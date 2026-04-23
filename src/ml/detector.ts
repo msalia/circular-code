@@ -2,7 +2,7 @@ import type { DetectionResult } from "@/types";
 
 import * as tf from "@tensorflow/tfjs";
 
-const MODEL_INPUT_SIZE = 320;
+const MODEL_INPUT_SIZE = 224;
 
 let model: tf.LayersModel | null = null;
 

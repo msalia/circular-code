@@ -1,4 +1,4 @@
-export function normalizeFrame(frame: HTMLCanvasElement, size = 320): HTMLCanvasElement {
+export function normalizeFrame(frame: HTMLCanvasElement, size = 224): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;

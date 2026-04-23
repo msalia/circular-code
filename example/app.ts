@@ -1,5 +1,6 @@
 import { encode } from "@/core/encoder";
 import { decode } from "@/core/decoder";
+import { getTotalSegments } from "@/core/layout";
 import { renderSVG } from "@/render/svgRenderer";
 import { renderCanvas } from "@/render/canvasRenderer";
 import type { EncodedCode } from "@/types";
@@ -35,7 +36,7 @@ function generate() {
     const code = encode(text, { rings, segmentsPerRing, eccBytes });
     lastCode = code;
 
-    const svg = renderSVG(code, size);
+    const svg = renderSVG(code, { size, primary: "#000000", secondary: "#d0d0d0" });
     lastSvg = svg;
 
     codeOutput.innerHTML = svg;
@@ -49,13 +50,13 @@ function generate() {
 
     const totalBits = code.bits.length;
     const dataBits = totalBits - eccBytes * 8;
-    const usedBits = rings * segmentsPerRing;
+    const gridSlots = getTotalSegments(rings, segmentsPerRing);
 
     statsEl.innerHTML = [
       `<div class="stat">Bits: <span>${totalBits}</span></div>`,
       `<div class="stat">Data: <span>${dataBits}</span></div>`,
       `<div class="stat">ECC: <span>${eccBytes * 8}</span></div>`,
-      `<div class="stat">Grid: <span>${rings}&times;${segmentsPerRing} = ${usedBits}</span></div>`,
+      `<div class="stat">Grid: <span>${gridSlots} slots</span></div>`,
       `<div class="stat">Match: <span>${decoded === text ? "Yes" : "No"}</span></div>`,
     ].join("");
   } catch (e: any) {

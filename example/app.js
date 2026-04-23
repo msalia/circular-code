@@ -106,9 +106,7 @@
     }
     const errorPositions = chienSearch(sigma, n);
     if (errorPositions.length !== numErrors) {
-      throw new Error(
-        `Found ${errorPositions.length} errors but expected ${numErrors}`
-      );
+      throw new Error(`Found ${errorPositions.length} errors but expected ${numErrors}`);
     }
     const omega = computeOmega(syndromes, sigma, eccBytes);
     applyForney(msg, errorPositions, sigma, omega, n);
@@ -242,6 +240,13 @@
   }
   function getSegmentsForRing(ring, rings, baseSegments) {
     return Math.max(8, Math.round(baseSegments * (ring + 1) / rings));
+  }
+  function getTotalSegments(rings, baseSegments) {
+    let total = 0;
+    for (let r = 0; r < rings; r++) {
+      if (isDataRing(r)) total += getSegmentsForRing(r, rings, baseSegments);
+    }
+    return total;
   }
 
   // src/render/svgRenderer.ts
@@ -425,7 +430,7 @@
     try {
       const code = encode(text, { rings, segmentsPerRing, eccBytes });
       lastCode = code;
-      const svg = renderSVG(code, size);
+      const svg = renderSVG(code, { size, primary: "#000000", secondary: "#d0d0d0" });
       lastSvg = svg;
       codeOutput.innerHTML = svg;
       codeOutput.classList.remove("empty");
@@ -435,12 +440,12 @@
       decodeResult.className = "decode-result " + (decoded === text ? "success" : "error");
       const totalBits = code.bits.length;
       const dataBits = totalBits - eccBytes * 8;
-      const usedBits = rings * segmentsPerRing;
+      const gridSlots = getTotalSegments(rings, segmentsPerRing);
       statsEl.innerHTML = [
         `<div class="stat">Bits: <span>${totalBits}</span></div>`,
         `<div class="stat">Data: <span>${dataBits}</span></div>`,
         `<div class="stat">ECC: <span>${eccBytes * 8}</span></div>`,
-        `<div class="stat">Grid: <span>${rings}&times;${segmentsPerRing} = ${usedBits}</span></div>`,
+        `<div class="stat">Grid: <span>${gridSlots} slots</span></div>`,
         `<div class="stat">Match: <span>${decoded === text ? "Yes" : "No"}</span></div>`
       ].join("");
     } catch (e) {

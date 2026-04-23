@@ -2,7 +2,6 @@
   "name": "circular-code",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "yarn@4.2.2",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -11,7 +10,7 @@
     "test:watch": "vitest",
     "generate-dataset": "rm -rf dataset/images dataset/labels && node dist/scripts/generateDataset.js",
     "train": "node dist/scripts/trainModel.js",
-    "typecheck": "npx tsc --noEmit",
+    "typecheck": "tsc --noEmit",
     "format": "prettier --write 'src/**/*.ts' 'scripts/**/*.ts'",
     "format:check": "prettier --check 'src/**/*.ts' 'scripts/**/*.ts'",
     "lint": "eslint 'src/**/*.ts' 'scripts/**/*.ts'",
@@ -20,6 +19,7 @@
     "example": "node example/build.js && node example/serve.js"
   },
   "devDependencies": {
+    "esbuild": "^0.25.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.6.0",
     "@types/react": "^19",
