@@ -1,4 +1,23 @@
 {
-  "name": "Circular Code",
-  "packageManager": "yarn@4.2.2"
+  "name": "circular-code",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "yarn@4.2.2",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/react": "^19",
+    "typescript": "^5.5.0",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
+    "canvas": "^3.2.3",
+    "react": "^19.2.5"
+  }
 }
