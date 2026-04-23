@@ -11,7 +11,9 @@
     "test:watch": "vitest",
     "generate-dataset": "rm -rf dataset/images dataset/labels && node dist/scripts/generateDataset.js",
     "train": "node dist/scripts/trainModel.js",
-    "typecheck": "npx tsc --noEmit"
+    "typecheck": "npx tsc --noEmit",
+    "example:build": "node example/build.js",
+    "example": "node example/build.js && node example/serve.js"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",

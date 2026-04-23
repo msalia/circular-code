@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Circular Code</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px;
+    }
+
+    h1 {
+      font-size: 28px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
+    }
+
+    .subtitle {
+      color: #888;
+      font-size: 14px;
+      margin-bottom: 36px;
+    }
+
+    .card {
+      background: #161616;
+      border: 1px solid #2a2a2a;
+      border-radius: 12px;
+      padding: 28px;
+      width: 100%;
+      max-width: 480px;
+      margin-bottom: 24px;
+    }
+
+    .card h2 {
+      font-size: 16px;
+      font-weight: 500;
+      margin-bottom: 16px;
+      color: #ccc;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid #333;
+      border-radius: 8px;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    input[type="text"]:focus { border-color: #555; }
+
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      background: #fff;
+      color: #000;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      white-space: nowrap;
+    }
+
+    button:hover { opacity: 0.85; }
+    button:active { opacity: 0.7; }
+
+    .options {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+
+    .option {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      flex: 1;
+      min-width: 80px;
+    }
+
+    .option label {
+      font-size: 11px;
+      color: #777;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .option select, .option input[type="number"] {
+      padding: 8px 10px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #0f0f0f;
+      color: #e0e0e0;
+      font-size: 13px;
+      outline: none;
+    }
+
+    #code-output {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100px;
+      border-radius: 8px;
+      background: #fff;
+      padding: 20px;
+    }
+
+    #code-output svg {
+      max-width: 100%;
+      height: auto;
+    }
+
+    #code-output.empty {
+      background: #111;
+      border: 1px dashed #333;
+      color: #555;
+      font-size: 13px;
+    }
+
+    .decode-section {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #2a2a2a;
+    }
+
+    .decode-result {
+      padding: 10px 14px;
+      background: #0f0f0f;
+      border: 1px solid #333;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 13px;
+      min-height: 20px;
+      word-break: break-all;
+    }
+
+    .decode-result.success { border-color: #2d5a2d; color: #6cbf6c; }
+    .decode-result.error { border-color: #5a2d2d; color: #bf6c6c; }
+
+    .stats {
+      display: flex;
+      gap: 16px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+
+    .stat {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .stat span { color: #aaa; }
+
+    .download-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .download-row button {
+      flex: 1;
+      background: #222;
+      color: #ccc;
+      border: 1px solid #333;
+      font-size: 12px;
+      padding: 8px 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Circular Code</h1>
+  <p class="subtitle">Encode text into circular barcodes with Reed-Solomon error correction</p>
+
+  <div class="card">
+    <h2>Generate</h2>
+    <div class="input-row">
+      <input type="text" id="text-input" placeholder="Enter text or URL..." value="https://example.com">
+      <button id="generate-btn">Generate</button>
+    </div>
+    <div class="options">
+      <div class="option">
+        <label>Rings</label>
+        <select id="opt-rings">
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5" selected>5</option>
+          <option value="6">6</option>
+        </select>
+      </div>
+      <div class="option">
+        <label>Segments</label>
+        <select id="opt-segments">
+          <option value="32">32</option>
+          <option value="48" selected>48</option>
+          <option value="64">64</option>
+        </select>
+      </div>
+      <div class="option">
+        <label>ECC Bytes</label>
+        <select id="opt-ecc">
+          <option value="8">8</option>
+          <option value="16" selected>16</option>
+          <option value="32">32</option>
+        </select>
+      </div>
+      <div class="option">
+        <label>Size</label>
+        <input type="number" id="opt-size" value="400" min="100" max="800" step="50">
+      </div>
+    </div>
+    <div id="code-output" class="empty">Enter text and click Generate</div>
+    <div class="download-row" id="download-row" style="display:none">
+      <button id="download-svg">Download SVG</button>
+      <button id="download-png">Download PNG</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Decode</h2>
+    <p style="font-size:13px; color:#777; margin-bottom:12px">
+      Verifies the generated code by decoding the bits back to text.
+    </p>
+    <div class="decode-result" id="decode-result"></div>
+    <div class="stats" id="stats"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
