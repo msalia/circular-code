@@ -12,7 +12,7 @@ export function isDataRing(ring: number): boolean {
 }
 
 export function getSegmentsForRing(ring: number, rings: number, baseSegments: number): number {
-  return Math.max(8, Math.round(baseSegments * (ring + 1) / rings));
+  return Math.max(8, Math.round((baseSegments * (ring + 1)) / rings));
 }
 
 export function getTotalSegments(rings: number, baseSegments: number): number {

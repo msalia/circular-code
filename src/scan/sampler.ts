@@ -6,7 +6,7 @@ export function samplePolarGrid(
   cy: number,
   radius: number,
   rings = 5,
-  segmentsPerRing = 48
+  segmentsPerRing = 48,
 ): number[] {
   const ctx = frame.getContext("2d");
   if (!ctx) {

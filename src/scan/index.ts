@@ -1,17 +1,14 @@
-import { captureFrame } from "@/utils/image";
-import { detectCircle } from "@/scan/detector";
-import { normalizeFrame } from "@/scan/normalize";
-import { samplePolarGrid } from "@/scan/sampler";
-import { scoreFrame } from "@/scan/frameScorer";
-import { warpPerspective, estimateCircleCorners } from "@/scan/perspective";
-import { MultiFrameConsensus } from "@/scan/consensus";
-import { loadModel, isModelLoaded, detectWithModel } from "@/ml/detector";
+import type { DetectionResult, ScanOptions, ScanResult } from "@/types";
+
 import { decode } from "@/core/decoder";
-import type {
-  DetectionResult,
-  ScanOptions,
-  ScanResult,
-} from "@/types";
+import { detectWithModel, isModelLoaded, loadModel } from "@/ml/detector";
+import { MultiFrameConsensus } from "@/scan/consensus";
+import { detectCircle } from "@/scan/detector";
+import { scoreFrame } from "@/scan/frameScorer";
+import { normalizeFrame } from "@/scan/normalize";
+import { estimateCircleCorners, warpPerspective } from "@/scan/perspective";
+import { samplePolarGrid } from "@/scan/sampler";
+import { captureFrame } from "@/utils/image";
 
 export async function scanFromVideo(
   video: HTMLVideoElement,
@@ -90,12 +87,7 @@ export function processFrame(
     minFrameScore?: number;
   } = {},
 ): ScanResult | null {
-  const {
-    rings = 5,
-    segmentsPerRing = 48,
-    eccBytes = 16,
-    minFrameScore = 0.3,
-  } = options;
+  const { rings = 5, segmentsPerRing = 48, eccBytes = 16, minFrameScore = 0.3 } = options;
 
   const raw = captureFrame(video);
   const normalized = normalizeFrame(raw);
@@ -103,12 +95,7 @@ export function processFrame(
 
   if (detection.confidence < 0.2) return null;
 
-  const frameScore = scoreFrame(
-    normalized,
-    detection.cx,
-    detection.cy,
-    detection.r,
-  );
+  const frameScore = scoreFrame(normalized, detection.cx, detection.cy, detection.r);
 
   if (frameScore.overall < minFrameScore) return null;
 

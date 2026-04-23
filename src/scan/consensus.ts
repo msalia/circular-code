@@ -34,10 +34,7 @@ export class MultiFrameConsensus {
     let bestScore = 0;
 
     for (const [data, { count, totalScore }] of counts) {
-      if (
-        count > bestCount ||
-        (count === bestCount && totalScore > bestScore)
-      ) {
+      if (count > bestCount || (count === bestCount && totalScore > bestScore)) {
         bestData = data;
         bestCount = count;
         bestScore = totalScore;

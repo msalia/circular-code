@@ -1,6 +1,7 @@
+import type { CircularCodeOptions, EncodedCode } from "@/types";
+
 import { bytesToBits } from "@/core/bitstream";
 import { rsEncode } from "@/ecc/reedSolomon";
-import type { CircularCodeOptions, EncodedCode } from "@/types";
 
 export function encode(input: string, opts: CircularCodeOptions = {}): EncodedCode {
   const { rings = 5, segmentsPerRing = 48, eccBytes = 16 } = opts;

@@ -7,12 +7,14 @@ Not Apple-compatible — this is an independent format with its own encoding, er
 ## Features
 
 - **Encoding/Decoding** — Text to circular bit pattern and back, with configurable rings and segments
+- **Adaptive ring layout** — Inner rings hold fewer segments proportional to circumference, preventing visual overlap
 - **Reed-Solomon ECC** — Real GF(256) error correction that recovers data from damaged codes
-- **SVG & Canvas rendering** — Generate codes for print or screen
+- **Dual-color SVG rendering** — Primary color for data arcs, secondary color for non-data segments with configurable gap separation
+- **Canvas rendering** — Generate codes for screen display
 - **Perspective correction** — Homography-based rectification for codes viewed at an angle
 - **Frame scoring** — Laplacian sharpness + contrast scoring to pick the best video frames
 - **Multi-frame consensus** — Weighted majority voting across frames for reliable scanning
-- **ML-assisted detection** — CNN trained on synthetic data to locate codes in images
+- **ML-assisted detection** — MobileNetV2-based CNN trained on synthetic data to locate codes in images
 - **React hook** — `useCircularScanner()` for drop-in camera scanning in React apps
 
 ## Project Structure
@@ -87,8 +89,17 @@ const code = encode("https://example.com", {
   eccBytes: 16,
 });
 
+// Basic rendering
 const svg = renderSVG(code, 300);
-document.getElementById("container").innerHTML = svg;
+
+// With color options
+const styledSvg = renderSVG(code, {
+  size: 400,
+  primary: "#1a1a2e",
+  secondary: "#e0ddd5",
+});
+
+document.getElementById("container").innerHTML = styledSvg;
 ```
 
 ### Decode
@@ -135,7 +146,7 @@ function Scanner() {
 
 ## Training the ML Detector
 
-The detector is a CNN (107K params, 320x320 input) that locates circular codes in images and outputs bounding box + rotation angle. Training uses synthetic data generated from the real encoder.
+The detector uses a MobileNetV2 backbone (pretrained on ImageNet) with a custom detection head that locates circular codes in images and outputs bounding box + rotation angle. Training uses synthetic data generated from the real SVG renderer.
 
 ### Prerequisites
 
@@ -160,7 +171,7 @@ npm run build
 npm run generate-dataset
 ```
 
-Produces 2,500 images (2,000 positive + 500 negative) in `dataset/` at 320x320. Positive samples use the real encoder with random text, rotation, skew, scale, noise, lighting variation, and background clutter. Labels are in YOLO-style format: `class cx cy w h sin(angle) cos(angle)`.
+Produces 5,000 images (4,000 positive + 1,000 negative) in `dataset/` at 320x320. Positive samples use the SVG renderer with randomly generated text (URLs, phrases, alphanumeric tokens, numbers), varied ring/segment configs, rotation, skew, scale, noise, lighting variation, and background clutter. Labels are in YOLO-style format: `class cx cy w h sin(angle) cos(angle)`.
 
 ### Step 2: Train the Model
 
@@ -168,12 +179,16 @@ Produces 2,500 images (2,000 positive + 500 negative) in `dataset/` at 320x320. 
 python3 training/train.py
 ```
 
-Trains for 20 epochs on Metal GPU (~2s/epoch). The trained model is automatically exported to TF.js format at `models/circular_code/model.json`.
+Trains in two phases on Metal GPU:
+1. **Phase 1** — Head training with frozen MobileNetV2 backbone (20 epochs)
+2. **Phase 2** — Fine-tuning top backbone layers at 1/10 learning rate (20 epochs)
+
+The trained model is exported to TF.js format at `models/circular_code/model.json`.
 
 Options:
 
 ```bash
-python3 training/train.py --epochs 50 --batch-size 64 --lr 0.001
+python3 training/train.py --epochs 40 --batch-size 32 --lr 0.001
 python3 training/train.py --dataset ./my_dataset --output ./my_model
 ```
 
@@ -215,7 +230,7 @@ test();
 "
 ```
 
-Expected output: `Model loaded. Input: [ null, 320, 320, 3 ] Output: [ null, 7 ]`
+Expected output: `Model loaded. Input: [ null, 224, 224, 3 ] Output: [ null, 7 ]`
 
 ## End-to-End Cheat Sheet
 
@@ -230,7 +245,7 @@ npm run generate-dataset
 
 # Train the ML detector on GPU and export to TF.js
 pip3 install tensorflow tensorflow-metal tensorflowjs Pillow numpy
-python3 training/train.py --epochs 20
+python3 training/train.py --epochs 40
 
 # Verify the trained model loads
 npm run build
@@ -245,12 +260,14 @@ npm test
 Text -> UTF-8 bytes -> [version, length, ...data] header
      -> Reed-Solomon ECC (GF(256), configurable redundancy)
      -> Bit stream -> Mapped to ring/segment grid
+        (inner rings get fewer segments proportional to circumference,
+         innermost ring is reserved as a visual spacer)
 ```
 
 ### Scanning Pipeline
 
 ```
-Video frame -> Capture -> Normalize to 320x320
+Video frame -> Capture -> Normalize to 224x224
             -> Detect (ML model if loaded, else Hough circles)
             -> Score frame (sharpness + contrast)
             -> Perspective correction (4-point homography warp)
@@ -261,16 +278,13 @@ Video frame -> Capture -> Normalize to 320x320
 ### Model Architecture
 
 ```
-Input: 320x320x3
-Conv2D(16, 3x3, stride=2) -> BatchNorm -> ReLU     [160x160x16]
-Conv2D(32, 3x3, stride=2) -> BatchNorm -> ReLU     [80x80x32]
-Conv2D(64, 3x3, stride=2) -> BatchNorm -> ReLU     [40x40x64]
-Conv2D(128, 3x3, stride=2) -> BatchNorm -> ReLU    [20x20x128]
-GlobalAveragePooling2D                               [128]
-Dropout(0.3) -> Dense(64, ReLU) -> Dense(7, linear)
+Input: 224x224x3
+MobileNetV2 backbone (ImageNet pretrained, top 30 layers fine-tuned)
+GlobalAveragePooling2D                               [1280]
+Dropout(0.3) -> Dense(128, ReLU) -> Dropout(0.2) -> Dense(7, linear)
 
 Output: [class_logit, cx, cy, w, h, sin(angle), cos(angle)]
-Loss: sigmoid_cross_entropy(class) + 5*MSE(bbox) + 2*MSE(angle)
+Loss: sigmoid_cross_entropy(class) + 2*MSE(bbox) + 1*MSE(angle)
 ```
 
 ## API Reference
@@ -288,7 +302,7 @@ Loss: sigmoid_cross_entropy(class) + 5*MSE(bbox) + 2*MSE(angle)
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `renderSVG` | `(code: EncodedCode, size?: number) => string` | Render as SVG string |
+| `renderSVG` | `(code: EncodedCode, opts?: SVGRenderOptions \| number) => string` | Render as SVG string with primary/secondary colors |
 | `renderCanvas` | `(code: EncodedCode, size?: number) => HTMLCanvasElement` | Render to canvas element |
 
 ### Scanning

@@ -145,19 +145,8 @@ export function warpPerspective(
   for (let dy = 0; dy < outputSize; dy++) {
     for (let dx = 0; dx < outputSize; dx++) {
       const src = applyHomography(H, dx, dy);
-      if (
-        src.x >= 0 &&
-        src.x < srcCanvas.width &&
-        src.y >= 0 &&
-        src.y < srcCanvas.height
-      ) {
-        const pixel = bilinearSample(
-          srcData.data,
-          srcCanvas.width,
-          srcCanvas.height,
-          src.x,
-          src.y,
-        );
+      if (src.x >= 0 && src.x < srcCanvas.width && src.y >= 0 && src.y < srcCanvas.height) {
+        const pixel = bilinearSample(srcData.data, srcCanvas.width, srcCanvas.height, src.x, src.y);
         const idx = (dy * outputSize + dx) * 4;
         outData.data[idx] = pixel[0];
         outData.data[idx + 1] = pixel[1];
@@ -171,11 +160,7 @@ export function warpPerspective(
   return outCanvas;
 }
 
-export function estimateCircleCorners(
-  cx: number,
-  cy: number,
-  r: number,
-): Point[] {
+export function estimateCircleCorners(cx: number, cy: number, r: number): Point[] {
   return [
     { x: cx - r, y: cy - r },
     { x: cx + r, y: cy - r },

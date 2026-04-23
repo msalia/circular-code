@@ -1,13 +1,12 @@
-import * as tf from "@tensorflow/tfjs";
 import type { DetectionResult } from "@/types";
+
+import * as tf from "@tensorflow/tfjs";
 
 const MODEL_INPUT_SIZE = 320;
 
 let model: tf.LayersModel | null = null;
 
-export async function loadModel(
-  modelUrl = "/models/circular_code/model.json",
-): Promise<void> {
+export async function loadModel(modelUrl = "/models/circular_code/model.json"): Promise<void> {
   model = await tf.loadLayersModel(modelUrl);
 }
 
@@ -25,9 +24,7 @@ export function isModelLoaded(): boolean {
   return model !== null;
 }
 
-export function detectWithModel(
-  canvas: HTMLCanvasElement,
-): DetectionResult | null {
+export function detectWithModel(canvas: HTMLCanvasElement): DetectionResult | null {
   if (!model) return null;
 
   const tensor = tf.tidy(() => {

@@ -271,15 +271,10 @@
       const segs = getSegmentsForRing(r, rings, segmentsPerRing);
       const segAngle = 2 * Math.PI / segs;
       const radius = getRingRadius(r, rings, size);
+      if (!isDataRing(r)) continue;
       const ringBits = [];
-      if (isDataRing(r)) {
-        for (let i2 = 0; i2 < segs; i2++) {
-          ringBits.push(bits[bitIndex++] ?? 0);
-        }
-      } else {
-        for (let i2 = 0; i2 < segs; i2++) {
-          ringBits.push(0);
-        }
+      for (let i2 = 0; i2 < segs; i2++) {
+        ringBits.push(bits[bitIndex++] ?? 0);
       }
       const primaryArcs = [];
       let i = 0;
@@ -383,10 +378,11 @@
     const cx = size / 2;
     const cy = size / 2;
     for (let ring = 0; ring < rings; ring++) {
+      if (!isDataRing(ring)) continue;
       const segs = getSegmentsForRing(ring, rings, segmentsPerRing);
       const radius = getRingRadius(ring, rings, size);
       for (let segment = 0; segment < segs; segment++) {
-        const bit = isDataRing(ring) ? bits[bitIndex++] ?? 0 : 0;
+        const bit = bits[bitIndex++] ?? 0;
         if (!bit) continue;
         const start = getSegmentAngle(segment, segs);
         const end = start + 2 * Math.PI / segs * 0.7;

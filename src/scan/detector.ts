@@ -3,7 +3,12 @@ import type { DetectionResult } from "@/types";
 export function detectCircle(frame: HTMLCanvasElement): DetectionResult {
   const ctx = frame.getContext("2d");
   if (!ctx) {
-    return { cx: frame.width / 2, cy: frame.height / 2, r: Math.min(frame.width, frame.height) * 0.4, confidence: 0 };
+    return {
+      cx: frame.width / 2,
+      cy: frame.height / 2,
+      r: Math.min(frame.width, frame.height) * 0.4,
+      confidence: 0,
+    };
   }
 
   const width = frame.width;
@@ -15,8 +20,8 @@ export function detectCircle(frame: HTMLCanvasElement): DetectionResult {
     const idx = i * 4;
     gray[i] = Math.round(
       0.299 * imageData.data[idx] +
-      0.587 * imageData.data[idx + 1] +
-      0.114 * imageData.data[idx + 2],
+        0.587 * imageData.data[idx + 1] +
+        0.114 * imageData.data[idx + 2],
     );
   }
 
@@ -26,11 +31,7 @@ export function detectCircle(frame: HTMLCanvasElement): DetectionResult {
   return result;
 }
 
-function sobelEdgeDetect(
-  gray: Uint8Array,
-  width: number,
-  height: number,
-): Uint8Array {
+function sobelEdgeDetect(gray: Uint8Array, width: number, height: number): Uint8Array {
   const edges = new Uint8Array(width * height);
 
   for (let y = 1; y < height - 1; y++) {
@@ -59,11 +60,7 @@ function sobelEdgeDetect(
   return edges;
 }
 
-function houghCircleDetect(
-  edges: Uint8Array,
-  width: number,
-  height: number,
-): DetectionResult {
+function houghCircleDetect(edges: Uint8Array, width: number, height: number): DetectionResult {
   const minR = Math.min(width, height) * 0.1;
   const maxR = Math.min(width, height) * 0.45;
   const rSteps = 20;

@@ -1,4 +1,5 @@
 import type { EncodedCode } from "@/types";
+
 import { getRingRadius, getSegmentAngle, getSegmentsForRing, isDataRing } from "@/core/layout";
 
 export function renderCanvas(code: EncodedCode, size = 300): HTMLCanvasElement {
@@ -14,7 +15,7 @@ export function renderCanvas(code: EncodedCode, size = 300): HTMLCanvasElement {
   ctx.clearRect(0, 0, size, size);
   ctx.strokeStyle = "black";
   ctx.lineCap = "round";
-  ctx.lineWidth = size / (2 * (rings + 2)) * 0.5;
+  ctx.lineWidth = (size / (2 * (rings + 2))) * 0.5;
 
   let bitIndex = 0;
   const cx = size / 2;
@@ -28,7 +29,7 @@ export function renderCanvas(code: EncodedCode, size = 300): HTMLCanvasElement {
       const bit = bits[bitIndex++] ?? 0;
       if (!bit) continue;
       const start = getSegmentAngle(segment, segs);
-      const end = start + (2 * Math.PI) / segs * 0.7;
+      const end = start + ((2 * Math.PI) / segs) * 0.7;
       ctx.beginPath();
       ctx.arc(cx, cy, radius, start, end);
       ctx.stroke();

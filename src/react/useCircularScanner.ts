@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import { processFrame } from "@/scan";
-import { loadModel, isModelLoaded } from "@/ml/detector";
-import { MultiFrameConsensus } from "@/scan/consensus";
 import type { ConsensusResult, ScanOptions } from "@/types";
+
+import { useEffect, useRef, useState } from "react";
+
+import { isModelLoaded, loadModel } from "@/ml/detector";
+import { processFrame } from "@/scan";
+import { MultiFrameConsensus } from "@/scan/consensus";
 
 export function useCircularScanner(options: ScanOptions = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);

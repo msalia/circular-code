@@ -29,11 +29,7 @@ export function scoreFrame(
   return { sharpness, contrast, overall };
 }
 
-function toGrayscale(
-  data: Uint8ClampedArray,
-  width: number,
-  height: number,
-): Float32Array {
+function toGrayscale(data: Uint8ClampedArray, width: number, height: number): Float32Array {
   const gray = new Float32Array(width * height);
   for (let i = 0; i < width * height; i++) {
     const idx = i * 4;
@@ -42,11 +38,7 @@ function toGrayscale(
   return gray;
 }
 
-function laplacianVariance(
-  gray: Float32Array,
-  width: number,
-  height: number,
-): number {
+function laplacianVariance(gray: Float32Array, width: number, height: number): number {
   let sum = 0;
   let count = 0;
 
@@ -54,11 +46,7 @@ function laplacianVariance(
     for (let x = 1; x < width - 1; x++) {
       const idx = y * width + x;
       const laplacian =
-        -4 * gray[idx] +
-        gray[idx - 1] +
-        gray[idx + 1] +
-        gray[idx - width] +
-        gray[idx + width];
+        -4 * gray[idx] + gray[idx - 1] + gray[idx + 1] + gray[idx - width] + gray[idx + width];
       sum += laplacian * laplacian;
       count++;
     }

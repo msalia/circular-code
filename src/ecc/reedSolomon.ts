@@ -1,11 +1,4 @@
-import {
-  EXP_TABLE,
-  gfMul,
-  gfDiv,
-  gfInverse,
-  gfPolyMul,
-  generatorPoly,
-} from "@/ecc/galoisField";
+import { EXP_TABLE, generatorPoly, gfDiv, gfInverse, gfMul, gfPolyMul } from "@/ecc/galoisField";
 
 export function rsEncode(data: Uint8Array, eccBytes = 16): Uint8Array {
   const gen = generatorPoly(eccBytes);
@@ -57,9 +50,7 @@ export function rsDecode(received: Uint8Array, eccBytes = 16): Uint8Array {
   const errorPositions = chienSearch(sigma, n);
 
   if (errorPositions.length !== numErrors) {
-    throw new Error(
-      `Found ${errorPositions.length} errors but expected ${numErrors}`,
-    );
+    throw new Error(`Found ${errorPositions.length} errors but expected ${numErrors}`);
   }
 
   const omega = computeOmega(syndromes, sigma, eccBytes);
@@ -133,11 +124,7 @@ function chienSearch(sigma: number[], msgLen: number): number[] {
   return positions;
 }
 
-function computeOmega(
-  syndromes: number[],
-  sigma: number[],
-  nsym: number,
-): number[] {
+function computeOmega(syndromes: number[], sigma: number[], nsym: number): number[] {
   const omega = new Array(nsym).fill(0);
   for (let i = 0; i < nsym; i++) {
     for (let j = 0; j < sigma.length; j++) {

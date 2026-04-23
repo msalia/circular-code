@@ -11,21 +11,23 @@ Usage:
 import argparse
 import json
 import os
+import ssl
 
 import numpy as np
 import sys
 
+ssl._create_default_https_context = ssl._create_unverified_context
+
 import tensorflow as tf
-import tensorflowjs as tfjs
 from PIL import Image
 
 # Allow importing sibling modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-IMAGE_SIZE = 320
+IMAGE_SIZE = 224
 BATCH_SIZE = 32
-EPOCHS = 20
-LEARNING_RATE = 2e-3
+EPOCHS = 40
+LEARNING_RATE = 1e-3
 
 
 def check_gpu():
@@ -77,32 +79,23 @@ def load_dataset(dataset_dir: str):
 
 
 def build_model():
-    model = tf.keras.Sequential(
-        [
-            tf.keras.layers.Conv2D(
-                16, 3, strides=2, padding="same", activation="relu",
-                input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3),
-            ),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.Conv2D(
-                32, 3, strides=2, padding="same", activation="relu"
-            ),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.Conv2D(
-                64, 3, strides=2, padding="same", activation="relu"
-            ),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.Conv2D(
-                128, 3, strides=2, padding="same", activation="relu"
-            ),
-            tf.keras.layers.BatchNormalization(),
-            tf.keras.layers.GlobalAveragePooling2D(),
-            tf.keras.layers.Dropout(0.3),
-            tf.keras.layers.Dense(64, activation="relu"),
-            tf.keras.layers.Dense(7),  # [class_logit, cx, cy, w, h, sin, cos]
-        ]
+    backbone = tf.keras.applications.MobileNetV2(
+        input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3),
+        include_top=False,
+        weights="imagenet",
     )
-    return model
+    backbone.trainable = False
+
+    inputs = tf.keras.Input(shape=(IMAGE_SIZE, IMAGE_SIZE, 3))
+    x = tf.keras.applications.mobilenet_v2.preprocess_input(inputs)
+    x = backbone(x, training=False)
+    x = tf.keras.layers.GlobalAveragePooling2D()(x)
+    x = tf.keras.layers.Dropout(0.3)(x)
+    x = tf.keras.layers.Dense(128, activation="relu")(x)
+    x = tf.keras.layers.Dropout(0.2)(x)
+    outputs = tf.keras.layers.Dense(7)(x)
+
+    return tf.keras.Model(inputs, outputs)
 
 
 def combined_loss(y_true, y_pred):
@@ -128,7 +121,7 @@ def combined_loss(y_true, y_pred):
         tf.reduce_sum(tf.square(angle_true - angle_pred), axis=-1) * mask
     )
 
-    return cls_loss + 5.0 * bbox_loss + 2.0 * angle_loss
+    return cls_loss + 2.0 * bbox_loss + 1.0 * angle_loss
 
 
 def export_to_tfjs(keras_model_path: str, output_dir: str):
@@ -151,6 +144,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=EPOCHS)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--lr", type=float, default=LEARNING_RATE)
+    parser.add_argument("--resume", type=str, default=None, help="Resume from a saved Keras model")
     args = parser.parse_args()
 
     check_gpu()
@@ -158,7 +152,13 @@ def main():
     train_x, train_y, val_x, val_y = load_dataset(args.dataset)
     print(f"Train: {len(train_x)}, Val: {len(val_x)}\n")
 
-    model = build_model()
+    if args.resume:
+        print(f"Resuming from {args.resume}")
+        model = tf.keras.models.load_model(
+            args.resume, custom_objects={"combined_loss": combined_loss}
+        )
+    else:
+        model = build_model()
     model.summary()
 
     model.compile(
@@ -181,28 +181,68 @@ def main():
         ),
     ]
 
+    # Phase 1: train head with frozen backbone
+    if not args.resume:
+        print("Phase 1: Training head (backbone frozen)...")
+        model.fit(
+            train_x,
+            train_y,
+            validation_data=(val_x, val_y),
+            epochs=args.epochs // 2,
+            batch_size=args.batch_size,
+            shuffle=True,
+            callbacks=callbacks,
+        )
+
+    # Phase 2: fine-tune top layers of backbone
+    print("\nPhase 2: Fine-tuning backbone...")
+    backbone = None
+    for layer in model.layers:
+        if hasattr(layer, 'layers') and len(layer.layers) > 10:
+            backbone = layer
+            break
+    if backbone is None:
+        print("Warning: could not find backbone, skipping fine-tuning")
+    else:
+        backbone.trainable = True
+        for layer in backbone.layers[:-30]:
+            layer.trainable = False
+
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=args.lr / 10),
+        loss=combined_loss,
+    )
+
     model.fit(
         train_x,
         train_y,
         validation_data=(val_x, val_y),
         epochs=args.epochs,
+        initial_epoch=args.epochs // 2,
         batch_size=args.batch_size,
         shuffle=True,
         callbacks=callbacks,
     )
 
+    model.save(keras_path)
+    print(f"\nKeras model saved to {keras_path}")
+
     # Export to TF.js
-    print("\nConverting to TensorFlow.js format...")
-    from export_tfjs import patch_model_json
+    print("Converting to TensorFlow.js format...")
+    try:
+        import tensorflowjs as tfjs
+        from export_tfjs import patch_model_json
 
-    tfjs.converters.save_keras_model(model, args.output)
-    patch_model_json(os.path.join(args.output, "model.json"))
+        tfjs.converters.save_keras_model(model, args.output)
+        patch_model_json(os.path.join(args.output, "model.json"))
 
-    # Clean up intermediate Keras file
-    if os.path.exists(keras_path):
-        os.remove(keras_path)
-
-    print("\nDone!")
+        if os.path.exists(keras_path):
+            os.remove(keras_path)
+        print("\nDone!")
+    except Exception as e:
+        print(f"\nTF.js export failed: {e}")
+        print(f"You can export manually with:")
+        print(f"  tensorflowjs_converter --input_format=keras '{keras_path}' '{args.output}'")
 
 
 if __name__ == "__main__":

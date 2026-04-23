@@ -1,4 +1,5 @@
 import type { EncodedCode } from "@/types";
+
 import { getRingRadius, getSegmentAngle, getSegmentsForRing, isDataRing } from "@/core/layout";
 
 const DEFAULT_SIZE = 300;
@@ -46,7 +47,10 @@ export function renderSVG(code: EncodedCode, opts: SVGRenderOptions | number = {
     const primaryArcs: { startSeg: number; runLen: number }[] = [];
     let i = 0;
     while (i < segs) {
-      if (!ringBits[i]) { i++; continue; }
+      if (!ringBits[i]) {
+        i++;
+        continue;
+      }
       let runEnd = i + 1;
       while (runEnd < segs && ringBits[runEnd]) runEnd++;
       primaryArcs.push({ startSeg: i, runLen: runEnd - i });
@@ -94,9 +98,10 @@ export function renderSVG(code: EncodedCode, opts: SVGRenderOptions | number = {
         const cur = primaryArcs[j];
         const next = primaryArcs[(j + 1) % primaryArcs.length];
         const gapStartSeg = cur.startSeg + cur.runLen + SECONDARY_SEPARATION;
-        const gapEndSeg = (j + 1 < primaryArcs.length)
-          ? next.startSeg - SECONDARY_SEPARATION
-          : next.startSeg + segs - SECONDARY_SEPARATION;
+        const gapEndSeg =
+          j + 1 < primaryArcs.length
+            ? next.startSeg - SECONDARY_SEPARATION
+            : next.startSeg + segs - SECONDARY_SEPARATION;
         const gapLen = gapEndSeg - gapStartSeg;
         if (gapLen < 1) continue;
 

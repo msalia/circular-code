@@ -1,33 +1,69 @@
-import { createCanvas, loadImage, type Canvas, type CanvasRenderingContext2D } from "canvas";
+import type { EncodedCode } from "@/types";
+
 import fs from "fs";
 import path from "path";
+
+import { type Canvas, type CanvasRenderingContext2D, createCanvas, loadImage } from "canvas";
+
 import { encode } from "@/core/encoder";
 import { renderSVG } from "@/render/svgRenderer";
-import type { EncodedCode } from "@/types";
 
 const OUT_DIR = "./dataset";
 const SIZE = 320;
-const POSITIVE_COUNT = 2000;
-const NEGATIVE_COUNT = 500;
+const POSITIVE_COUNT = 4000;
+const NEGATIVE_COUNT = 1000;
 
-const SAMPLE_STRINGS = [
-  "hello world",
-  "https://example.com",
-  "test123",
-  "circular",
-  "ABCDEF",
-  "scan me",
-  "code 42",
-  "data",
+const ALPHA = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const ALNUM = ALPHA + "0123456789";
+const URL_TLDS = ["com", "org", "net", "io", "dev", "co", "app"];
+const URL_WORDS = [
+  "app",
   "link",
-  "open",
   "go",
-  "ok",
-  "hi",
-  "12345678",
-  "qr alt",
-  "NC27",
+  "my",
+  "get",
+  "try",
+  "use",
+  "open",
+  "run",
+  "dev",
+  "api",
+  "hub",
+  "lab",
+  "bit",
+  "one",
 ];
+
+function randomChars(charset: string, len: number): string {
+  let s = "";
+  for (let i = 0; i < len; i++) s += charset[Math.floor(Math.random() * charset.length)];
+  return s;
+}
+
+function randomString(): string {
+  const type = Math.random();
+
+  if (type < 0.25) {
+    const tld = URL_TLDS[Math.floor(Math.random() * URL_TLDS.length)];
+    const word = URL_WORDS[Math.floor(Math.random() * URL_WORDS.length)];
+    const path = Math.random() > 0.5 ? `/${randomChars(ALNUM, randomInt(2, 6))}` : "";
+    return `https://${word}.${tld}${path}`;
+  }
+
+  if (type < 0.5) {
+    const wordCount = randomInt(2, 4);
+    const words: string[] = [];
+    for (let i = 0; i < wordCount; i++)
+      words.push(randomChars(ALPHA.slice(0, 26), randomInt(2, 7)));
+    return words.join(" ");
+  }
+
+  if (type < 0.75) {
+    return randomChars(ALNUM, randomInt(4, 12));
+  }
+
+  return randomChars("0123456789", randomInt(4, 10));
+}
 
 function random(min: number, max: number): number {
   return Math.random() * (max - min) + min;
@@ -61,23 +97,14 @@ async function drawCircularCode(
   ctx.drawImage(img, cx - codeSize / 2, cy - codeSize / 2);
 }
 
-function addBackgroundNoise(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-): void {
+function addBackgroundNoise(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const numShapes = randomInt(0, 8);
   for (let i = 0; i < numShapes; i++) {
     ctx.fillStyle = randomColor(100, 240);
     ctx.globalAlpha = random(0.1, 0.4);
     const shapeType = randomInt(0, 2);
     if (shapeType === 0) {
-      ctx.fillRect(
-        random(0, w),
-        random(0, h),
-        random(10, 80),
-        random(10, 80),
-      );
+      ctx.fillRect(random(0, w), random(0, h), random(10, 80), random(10, 80));
     } else if (shapeType === 1) {
       ctx.beginPath();
       ctx.arc(random(0, w), random(0, h), random(5, 40), 0, Math.PI * 2);
@@ -94,11 +121,7 @@ function addBackgroundNoise(
   }
 }
 
-function addNoisePixels(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-): void {
+function addNoisePixels(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   const imageData = ctx.getImageData(0, 0, w, h);
   const noiseLevel = random(0, 25);
   for (let i = 0; i < imageData.data.length; i += 4) {
@@ -108,33 +131,18 @@ function addNoisePixels(
     );
     imageData.data[i + 1] = Math.max(
       0,
-      Math.min(
-        255,
-        imageData.data[i + 1] + random(-noiseLevel, noiseLevel),
-      ),
+      Math.min(255, imageData.data[i + 1] + random(-noiseLevel, noiseLevel)),
     );
     imageData.data[i + 2] = Math.max(
       0,
-      Math.min(
-        255,
-        imageData.data[i + 2] + random(-noiseLevel, noiseLevel),
-      ),
+      Math.min(255, imageData.data[i + 2] + random(-noiseLevel, noiseLevel)),
     );
   }
   ctx.putImageData(imageData, 0, 0);
 }
 
-function applyBrightnessVariation(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-): void {
-  const gradient = ctx.createLinearGradient(
-    random(0, w),
-    random(0, h),
-    random(0, w),
-    random(0, h),
-  );
+function applyBrightnessVariation(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const gradient = ctx.createLinearGradient(random(0, w), random(0, h), random(0, w), random(0, h));
   gradient.addColorStop(0, `rgba(255,255,255,${random(0, 0.15)})`);
   gradient.addColorStop(1, `rgba(0,0,0,${random(0, 0.15)})`);
   ctx.fillStyle = gradient;
@@ -151,7 +159,7 @@ async function generatePositive(index: number): Promise<void> {
 
   addBackgroundNoise(ctx, SIZE, SIZE);
 
-  const text = SAMPLE_STRINGS[randomInt(0, SAMPLE_STRINGS.length - 1)];
+  const text = randomString();
   const code = encode(text, {
     rings: randomInt(3, 6),
     segmentsPerRing: [32, 48, 64][randomInt(0, 2)],
@@ -276,14 +284,9 @@ async function main(): Promise<void> {
     labelFormat: "class cx cy w h sin(angle) cos(angle)",
     classMap: { 0: "no_code", 1: "circular_code" },
   };
-  fs.writeFileSync(
-    path.join(OUT_DIR, "manifest.json"),
-    JSON.stringify(manifest, null, 2),
-  );
+  fs.writeFileSync(path.join(OUT_DIR, "manifest.json"), JSON.stringify(manifest, null, 2));
 
-  console.log(
-    `Done. ${POSITIVE_COUNT + NEGATIVE_COUNT} samples written to ${OUT_DIR}/`,
-  );
+  console.log(`Done. ${POSITIVE_COUNT + NEGATIVE_COUNT} samples written to ${OUT_DIR}/`);
 }
 
 main();
