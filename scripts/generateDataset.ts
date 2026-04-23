@@ -1,8 +1,8 @@
-import { createCanvas, type Canvas, type CanvasRenderingContext2D } from "canvas";
+import { createCanvas, loadImage, type Canvas, type CanvasRenderingContext2D } from "canvas";
 import fs from "fs";
 import path from "path";
 import { encode } from "@/core/encoder";
-import { getRingRadius, getSegmentAngle } from "@/core/layout";
+import { renderSVG } from "@/render/svgRenderer";
 import type { EncodedCode } from "@/types";
 
 const OUT_DIR = "./dataset";
@@ -44,40 +44,21 @@ function randomColor(minBright: number, maxBright: number): string {
   return `rgb(${r},${g},${b})`;
 }
 
-function drawCircularCode(
+async function drawCircularCode(
   ctx: CanvasRenderingContext2D,
   code: EncodedCode,
   cx: number,
   cy: number,
   codeSize: number,
   fgColor: string,
-): void {
-  const { bits, rings, segmentsPerRing } = code;
-  const ringWidth = codeSize / (2 * (rings + 2));
-
-  ctx.strokeStyle = fgColor;
-  ctx.lineCap = "round";
-  ctx.lineWidth = ringWidth * 0.5;
-
-  let bitIndex = 0;
-  for (let r = 0; r < rings; r++) {
-    const radius = getRingRadius(r, rings, codeSize);
-    for (let s = 0; s < segmentsPerRing; s++) {
-      const bit = bits[bitIndex++] ?? 0;
-      if (!bit) continue;
-      const startAngle = getSegmentAngle(s, segmentsPerRing);
-      const endAngle =
-        startAngle + ((2 * Math.PI) / segmentsPerRing) * 0.7;
-      ctx.beginPath();
-      ctx.arc(cx, cy, radius, startAngle, endAngle);
-      ctx.stroke();
-    }
-  }
-
-  ctx.beginPath();
-  ctx.arc(cx, cy, ringWidth, 0, Math.PI * 2);
-  ctx.fillStyle = fgColor;
-  ctx.fill();
+): Promise<void> {
+  const svg = renderSVG(code, {
+    size: Math.round(codeSize),
+    primary: fgColor,
+    secondary: "none",
+  });
+  const img = await loadImage(Buffer.from(svg));
+  ctx.drawImage(img, cx - codeSize / 2, cy - codeSize / 2);
 }
 
 function addBackgroundNoise(
@@ -160,7 +141,7 @@ function applyBrightnessVariation(
   ctx.fillRect(0, 0, w, h);
 }
 
-function generatePositive(index: number): void {
+async function generatePositive(index: number): Promise<void> {
   const canvas = createCanvas(SIZE, SIZE);
   const ctx = canvas.getContext("2d");
 
@@ -182,9 +163,6 @@ function generatePositive(index: number): void {
   const cy = SIZE / 2 + random(-40, 40);
   const rotation = random(0, Math.PI * 2);
 
-  const fgBright = randomInt(0, 60);
-  const fgColor = `rgb(${fgBright},${fgBright},${fgBright})`;
-
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(rotation);
@@ -195,7 +173,9 @@ function generatePositive(index: number): void {
   const scaleY = random(0.85, 1.15);
   ctx.transform(scaleX, skewY, skewX, scaleY, 0, 0);
 
-  drawCircularCode(ctx, code, 0, 0, codeSize, fgColor);
+  const fgBright = randomInt(0, 60);
+  const fgColor = `rgb(${fgBright},${fgBright},${fgBright})`;
+  await drawCircularCode(ctx, code, 0, 0, codeSize, fgColor);
   ctx.restore();
 
   applyBrightnessVariation(ctx, SIZE, SIZE);
@@ -268,13 +248,13 @@ function generateNegative(index: number): void {
   fs.writeFileSync(labelPath, label);
 }
 
-function main(): void {
+async function main(): Promise<void> {
   fs.mkdirSync(path.join(OUT_DIR, "images"), { recursive: true });
   fs.mkdirSync(path.join(OUT_DIR, "labels"), { recursive: true });
 
   console.log(`Generating ${POSITIVE_COUNT} positive samples...`);
   for (let i = 0; i < POSITIVE_COUNT; i++) {
-    generatePositive(i);
+    await generatePositive(i);
     if ((i + 1) % 200 === 0) {
       console.log(`  ${i + 1}/${POSITIVE_COUNT}`);
     }

@@ -1,4 +1,4 @@
-import { getSegmentAngle } from "@/core/layout";
+import { getSegmentAngle, getSegmentsForRing, isDataRing } from "@/core/layout";
 
 export function samplePolarGrid(
   frame: HTMLCanvasElement,
@@ -17,9 +17,12 @@ export function samplePolarGrid(
   const ringSpacing = radius / (rings + 1);
 
   for (let r = 1; r <= rings; r++) {
+    const ringIndex = r - 1;
+    if (!isDataRing(ringIndex)) continue;
+    const segs = getSegmentsForRing(ringIndex, rings, segmentsPerRing);
     const sampleRadius = r * ringSpacing;
-    for (let segment = 0; segment < segmentsPerRing; segment++) {
-      const angle = getSegmentAngle(segment, segmentsPerRing);
+    for (let segment = 0; segment < segs; segment++) {
+      const angle = getSegmentAngle(segment, segs);
       const x = Math.round(cx + sampleRadius * Math.cos(angle));
       const y = Math.round(cy + sampleRadius * Math.sin(angle));
       const pixel = ctx.getImageData(x, y, 1, 1).data;

@@ -3,6 +3,7 @@ export { decode } from "@/core/decoder";
 export { bytesToBits, bitsToBytes } from "@/core/bitstream";
 export { rsEncode, rsDecode } from "@/ecc/reedSolomon";
 export { renderSVG } from "@/render/svgRenderer";
+export type { SVGRenderOptions } from "@/render/svgRenderer";
 export { renderCanvas } from "@/render/canvasRenderer";
 export { scanFromVideo, processFrame } from "@/scan";
 export { MultiFrameConsensus } from "@/scan/consensus";
