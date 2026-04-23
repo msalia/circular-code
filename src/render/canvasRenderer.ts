@@ -1,5 +1,5 @@
-import type { EncodedCode } from "../types";
-import { getRingRadius, getSegmentAngle } from "../core/layout";
+import type { EncodedCode } from "@/types";
+import { getRingRadius, getSegmentAngle } from "@/core/layout";
 
 export function renderCanvas(code: EncodedCode, size = 300): HTMLCanvasElement {
   const { bits, rings, segmentsPerRing } = code;

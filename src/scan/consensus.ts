@@ -1,4 +1,4 @@
-import type { ConsensusResult, ScanResult } from "../types";
+import type { ConsensusResult, ScanResult } from "@/types";
 
 export class MultiFrameConsensus {
   private buffer: ScanResult[] = [];

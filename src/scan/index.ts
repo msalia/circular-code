@@ -1,12 +1,17 @@
-import { captureFrame } from "../utils/image";
-import { detectCircle } from "./detector";
-import { normalizeFrame } from "./normalize";
-import { samplePolarGrid } from "./sampler";
-import { scoreFrame } from "./frameScorer";
-import { warpPerspective, estimateCircleCorners } from "./perspective";
-import { MultiFrameConsensus } from "./consensus";
-import { decode } from "../core/decoder";
-import type { ScanOptions, ScanResult, ConsensusResult } from "../types";
+import { captureFrame } from "@/utils/image";
+import { detectCircle } from "@/scan/detector";
+import { normalizeFrame } from "@/scan/normalize";
+import { samplePolarGrid } from "@/scan/sampler";
+import { scoreFrame } from "@/scan/frameScorer";
+import { warpPerspective, estimateCircleCorners } from "@/scan/perspective";
+import { MultiFrameConsensus } from "@/scan/consensus";
+import { loadModel, isModelLoaded, detectWithModel } from "@/ml/detector";
+import { decode } from "@/core/decoder";
+import type {
+  DetectionResult,
+  ScanOptions,
+  ScanResult,
+} from "@/types";
 
 export async function scanFromVideo(
   video: HTMLVideoElement,
@@ -19,7 +24,12 @@ export async function scanFromVideo(
     minFrameScore = 0.3,
     consensusSize = 7,
     consensusRequired = 3,
+    modelUrl,
   } = options;
+
+  if (modelUrl && !isModelLoaded()) {
+    await loadModel(modelUrl);
+  }
 
   const consensus = new MultiFrameConsensus(consensusSize, consensusRequired);
 
@@ -63,6 +73,14 @@ export async function scanFromVideo(
   });
 }
 
+function detect(canvas: HTMLCanvasElement): DetectionResult {
+  if (isModelLoaded()) {
+    const mlResult = detectWithModel(canvas);
+    if (mlResult) return mlResult;
+  }
+  return detectCircle(canvas);
+}
+
 export function processFrame(
   video: HTMLVideoElement,
   options: {
@@ -81,7 +99,7 @@ export function processFrame(
 
   const raw = captureFrame(video);
   const normalized = normalizeFrame(raw);
-  const detection = detectCircle(normalized);
+  const detection = detect(normalized);
 
   if (detection.confidence < 0.2) return null;
 
@@ -94,17 +112,12 @@ export function processFrame(
 
   if (frameScore.overall < minFrameScore) return null;
 
-  let samplingCanvas = normalized;
-  if (detection.corners && detection.corners.length === 4) {
-    samplingCanvas = warpPerspective(normalized, detection.corners, 320);
-  } else {
-    const corners = estimateCircleCorners(
-      detection.cx,
-      detection.cy,
-      detection.r,
-    );
-    samplingCanvas = warpPerspective(normalized, corners, 320);
-  }
+  const corners =
+    detection.corners && detection.corners.length === 4
+      ? detection.corners
+      : estimateCircleCorners(detection.cx, detection.cy, detection.r);
+
+  const samplingCanvas = warpPerspective(normalized, corners, 320);
 
   const bits = samplePolarGrid(
     samplingCanvas,

@@ -15,3 +15,7 @@
 node_modules
 dist
 dataset
+training/venv
+__pycache__
+
+.DS_Store

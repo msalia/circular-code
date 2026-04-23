@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { solveHomography, invertHomography } from "../src/scan/perspective";
-import type { Point } from "../src/types";
+import { solveHomography, invertHomography } from "@/scan/perspective";
+import type { Point } from "@/types";
 
 describe("perspective", () => {
   it("identity homography for matching points", () => {

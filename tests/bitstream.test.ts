@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bytesToBits, bitsToBytes } from "../src/core/bitstream";
+import { bytesToBits, bitsToBytes } from "@/core/bitstream";
 
 describe("bitstream", () => {
   it("bytesToBits converts correctly", () => {

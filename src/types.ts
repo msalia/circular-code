@@ -21,6 +21,7 @@ export type DetectionResult = {
   r: number;
   corners?: Point[];
   confidence: number;
+  angle?: number;
 };
 
 export type FrameScore = {
@@ -48,4 +49,5 @@ export type ScanOptions = {
   minFrameScore?: number;
   consensusSize?: number;
   consensusRequired?: number;
+  modelUrl?: string;
 };

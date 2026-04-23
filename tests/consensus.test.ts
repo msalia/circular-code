@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { MultiFrameConsensus } from "../src/scan/consensus";
-import type { ScanResult } from "../src/types";
+import { MultiFrameConsensus } from "@/scan/consensus";
+import type { ScanResult } from "@/types";
 
 function makeScanResult(data: string, overall = 0.8): ScanResult {
   return {

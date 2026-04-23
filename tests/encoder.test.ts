@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { encode } from "../src/core/encoder";
-import { decode } from "../src/core/decoder";
+import { encode } from "@/core/encoder";
+import { decode } from "@/core/decoder";
 
 describe("encode/decode", () => {
   it("roundtrip with short string", () => {

@@ -1,4 +1,4 @@
-import type { Point } from "../types";
+import type { Point } from "@/types";
 
 export function solveHomography(src: Point[], dst: Point[]): number[] {
   if (src.length !== 4 || dst.length !== 4) {

@@ -1,5 +1,5 @@
-import { bitsToBytes } from "./bitstream";
-import { rsDecode } from "../ecc/reedSolomon";
+import { bitsToBytes } from "@/core/bitstream";
+import { rsDecode } from "@/ecc/reedSolomon";
 
 export function decode(bits: number[], eccBytes = 16): string {
   const bytes = bitsToBytes(bits);

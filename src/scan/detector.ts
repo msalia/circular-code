@@ -1,4 +1,4 @@
-import type { DetectionResult } from "../types";
+import type { DetectionResult } from "@/types";
 
 export function detectCircle(frame: HTMLCanvasElement): DetectionResult {
   const ctx = frame.getContext("2d");

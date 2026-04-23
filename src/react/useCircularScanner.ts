@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { processFrame } from "../scan";
-import { MultiFrameConsensus } from "../scan/consensus";
-import type { ConsensusResult, ScanOptions } from "../types";
+import { processFrame } from "@/scan";
+import { loadModel, isModelLoaded } from "@/ml/detector";
+import { MultiFrameConsensus } from "@/scan/consensus";
+import type { ConsensusResult, ScanOptions } from "@/types";
 
 export function useCircularScanner(options: ScanOptions = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -16,6 +17,10 @@ export function useCircularScanner(options: ScanOptions = {}) {
     );
 
     async function start() {
+      if (options.modelUrl && !isModelLoaded()) {
+        await loadModel(options.modelUrl);
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
       });

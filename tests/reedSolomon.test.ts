@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rsEncode, rsDecode } from "../src/ecc/reedSolomon";
+import { rsEncode, rsDecode } from "@/ecc/reedSolomon";
 
 describe("Reed-Solomon", () => {
   it("encode adds ECC bytes", () => {

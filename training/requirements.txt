@@ -1,0 +1,5 @@
+tensorflow>=2.14
+tensorflow-metal
+tensorflowjs>=4.0
+Pillow
+numpy

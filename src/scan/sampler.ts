@@ -1,4 +1,4 @@
-import { getSegmentAngle } from "../core/layout";
+import { getSegmentAngle } from "@/core/layout";
 
 export function samplePolarGrid(
   frame: HTMLCanvasElement,

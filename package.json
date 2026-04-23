@@ -6,11 +6,15 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/resolve-aliases.js",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "generate-dataset": "rm -rf dataset/images dataset/labels && node dist/scripts/generateDataset.js",
+    "train": "node dist/scripts/trainModel.js",
+    "typecheck": "npx tsc --noEmit"
   },
   "devDependencies": {
+    "@types/node": "^25.6.0",
     "@types/react": "^19",
     "typescript": "^5.5.0",
     "vitest": "^3.2.4"

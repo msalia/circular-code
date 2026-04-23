@@ -1,5 +1,5 @@
-import type { EncodedCode } from "../types";
-import { getRingRadius, getSegmentAngle } from "../core/layout";
+import type { EncodedCode } from "@/types";
+import { getRingRadius, getSegmentAngle } from "@/core/layout";
 
 export function renderSVG(code: EncodedCode, size = 300): string {
   const { bits, rings, segmentsPerRing } = code;

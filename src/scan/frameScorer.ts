@@ -1,4 +1,4 @@
-import type { FrameScore } from "../types";
+import type { FrameScore } from "@/types";
 
 export function scoreFrame(
   canvas: HTMLCanvasElement,
