@@ -9,7 +9,13 @@ export { processFrame, scanFromVideo } from "@/scan";
 export { MultiFrameConsensus } from "@/scan/consensus";
 export { scoreFrame } from "@/scan/frameScorer";
 export { solveHomography, warpPerspective } from "@/scan/perspective";
-export { detectWithModel, isModelLoaded, loadModel, loadModelFromFiles } from "@/ml/detector";
+export {
+  detectWithModel,
+  interpretPrediction,
+  isModelLoaded,
+  loadModel,
+  loadModelFromFiles,
+} from "@/ml/detector";
 export { useCircularScanner } from "@/react/useCircularScanner";
 export type {
   CircularCodeOptions,

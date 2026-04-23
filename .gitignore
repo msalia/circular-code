@@ -5,9 +5,10 @@ dataset
 training/venv
 __pycache__
 
-# Intermediate training artifacts (TF.js model files are kept)
+# Training artifacts and model weights (reproducible via training pipeline)
 *.keras
 *.h5
+models/**/*.bin
 
 .DS_Store
 .claude/settings.local.json

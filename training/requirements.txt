@@ -1,6 +1,5 @@
-tensorflow>=2.14,<3
-tensorflow-metal
-tensorflowjs>=4.0
+tensorflow>=2.14,<2.20
+tensorflow-metal>=1.0,<1.3
 Pillow
 numpy
 setuptools<81

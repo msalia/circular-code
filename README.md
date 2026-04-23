@@ -42,7 +42,7 @@ training/
   setup_venv.sh        Virtual environment setup script
 
 tests/                 Vitest unit and integration tests
-models/circular_code/  Trained TF.js model (model.json + weights)
+models/circular_code/  Trained TF.js model output (gitignored, generate via training pipeline)
 dataset/               Generated training images and labels (gitignored)
 ```
 
@@ -243,13 +243,12 @@ npm test
 # Generate synthetic training data
 npm run generate-dataset
 
-# Train the ML detector on GPU and export to TF.js
-pip3 install tensorflow tensorflow-metal tensorflowjs Pillow numpy
+# Set up training environment and generate model
+bash training/setup_venv.sh
+source training/venv/bin/activate
+npm run generate-dataset
 python3 training/train.py --epochs 40
-
-# Verify the trained model loads
-npm run build
-npm test
+python3 training/export_tfjs.py
 ```
 
 ## Architecture

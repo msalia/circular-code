@@ -24,6 +24,32 @@ export function isModelLoaded(): boolean {
   return model !== null;
 }
 
+export function interpretPrediction(
+  values: ArrayLike<number>,
+  frameW: number,
+  frameH: number,
+): DetectionResult | null {
+  const classLogit = values[0];
+  const confidence = 1 / (1 + Math.exp(-classLogit));
+
+  if (confidence < 0.5) return null;
+
+  const cx = values[1];
+  const cy = values[2];
+  const w = values[3];
+  const h = values[4];
+  const sinA = values[5];
+  const cosA = values[6];
+
+  return {
+    cx: cx * frameW,
+    cy: cy * frameH,
+    r: Math.min(w * frameW, h * frameH) / 2,
+    confidence,
+    angle: Math.atan2(sinA, cosA),
+  };
+}
+
 export function detectWithModel(canvas: HTMLCanvasElement): DetectionResult | null {
   if (!model) return null;
 
@@ -48,27 +74,7 @@ export function detectWithModel(canvas: HTMLCanvasElement): DetectionResult | nu
     pred.dispose();
     tensor.dispose();
 
-    const classLogit = values[0];
-    const confidence = 1 / (1 + Math.exp(-classLogit));
-    const cx = values[1];
-    const cy = values[2];
-    const w = values[3];
-    const h = values[4];
-    const sinA = values[5];
-    const cosA = values[6];
-
-    if (confidence < 0.5) return null;
-
-    const frameW = canvas.width;
-    const frameH = canvas.height;
-
-    return {
-      cx: cx * frameW,
-      cy: cy * frameH,
-      r: Math.min(w * frameW, h * frameH) / 2,
-      confidence,
-      angle: Math.atan2(sinA, cosA),
-    };
+    return interpretPrediction(values, canvas.width, canvas.height);
   } catch {
     tensor.dispose();
     return null;
