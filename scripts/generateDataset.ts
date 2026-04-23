@@ -10,8 +10,8 @@ import { renderSVG } from "@/render/svgRenderer";
 
 const OUT_DIR = "./dataset";
 const SIZE = 320;
-const POSITIVE_COUNT = 4000;
-const NEGATIVE_COUNT = 1000;
+const POSITIVE_COUNT = 8000;
+const NEGATIVE_COUNT = 2000;
 
 const ALPHA = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const ALNUM = ALPHA + "0123456789";
