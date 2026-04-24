@@ -8,7 +8,6 @@ __pycache__
 # Training artifacts and model weights (reproducible via training pipeline)
 *.keras
 *.h5
-models/**/*.bin
 runs
 
 .DS_Store
