@@ -55,7 +55,7 @@ def load_dataset(dataset_dir: str):
         lbl_path = os.path.join(dataset_dir, "labels", f"{i}.txt")
 
         img = Image.open(img_path).convert("RGB").resize((IMAGE_SIZE, IMAGE_SIZE))
-        images[i] = np.array(img, dtype=np.float32) / 255.0
+        images[i] = preprocess_mobilenet(np.array(img, dtype=np.float32))
 
         with open(lbl_path) as f:
             labels[i] = list(map(float, f.read().strip().split()))
@@ -78,6 +78,11 @@ def load_dataset(dataset_dir: str):
     )
 
 
+def preprocess_mobilenet(images):
+    """MobileNetV2 preprocessing: [0,255] -> [-1,1]."""
+    return images / 127.5 - 1.0
+
+
 def build_model():
     backbone = tf.keras.applications.MobileNetV2(
         input_shape=(IMAGE_SIZE, IMAGE_SIZE, 3),
@@ -87,8 +92,7 @@ def build_model():
     backbone.trainable = False
 
     inputs = tf.keras.Input(shape=(IMAGE_SIZE, IMAGE_SIZE, 3))
-    x = tf.keras.applications.mobilenet_v2.preprocess_input(inputs)
-    x = backbone(x, training=False)
+    x = backbone(inputs, training=False)
     x = tf.keras.layers.GlobalAveragePooling2D()(x)
     x = tf.keras.layers.Dropout(0.3)(x)
     x = tf.keras.layers.Dense(128, activation="relu")(x)
@@ -227,22 +231,21 @@ def main():
     model.save(keras_path)
     print(f"\nKeras model saved to {keras_path}")
 
-    # Export to TF.js
+    # Export to TF.js via SavedModel -> GraphModel
     print("Converting to TensorFlow.js format...")
     try:
+        import shutil
+        import tempfile
         import tensorflowjs as tfjs
-        from export_tfjs import patch_model_json
 
-        tfjs.converters.save_keras_model(model, args.output)
-        patch_model_json(os.path.join(args.output, "model.json"))
-
-        if os.path.exists(keras_path):
-            os.remove(keras_path)
+        saved_model_dir = tempfile.mkdtemp(prefix="tfjs_export_")
+        tf.saved_model.save(model, saved_model_dir)
+        tfjs.converters.convert_tf_saved_model(saved_model_dir, args.output)
+        shutil.rmtree(saved_model_dir)
         print("\nDone!")
     except Exception as e:
         print(f"\nTF.js export failed: {e}")
-        print(f"You can export manually with:")
-        print(f"  tensorflowjs_converter --input_format=keras '{keras_path}' '{args.output}'")
+        print(f"Run manually: python training/export_tfjs.py")
 
 
 if __name__ == "__main__":

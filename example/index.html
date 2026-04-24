@@ -31,13 +31,25 @@
       margin-bottom: 36px;
     }
 
+    .card-row {
+      display: flex;
+      gap: 24px;
+      width: 100%;
+      max-width: 1000px;
+      align-items: flex-start;
+    }
+
+    @media (max-width: 720px) {
+      .card-row { flex-direction: column; }
+    }
+
     .card {
       background: #161616;
       border: 1px solid #2a2a2a;
       border-radius: 12px;
       padding: 28px;
-      width: 100%;
-      max-width: 480px;
+      flex: 1;
+      min-width: 0;
       margin-bottom: 24px;
     }
 
@@ -186,63 +198,119 @@
       font-size: 12px;
       padding: 8px 12px;
     }
+
+    .video-container {
+      border-radius: 8px;
+      overflow: hidden;
+      background: #111;
+      border: 1px solid #333;
+      min-height: 120px;
+      position: relative;
+    }
+
+    .video-container video {
+      width: 100%;
+      display: block;
+    }
+
+    .video-container canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .scan-status {
+      font-size: 13px;
+      color: #777;
+    }
+
+    .scan-status.active { color: #6cbf6c; }
+    .scan-status.error { color: #bf6c6c; }
   </style>
 </head>
 <body>
   <h1>Circular Code</h1>
   <p class="subtitle">Encode text into circular barcodes with Reed-Solomon error correction</p>
 
-  <div class="card">
-    <h2>Generate</h2>
-    <div class="input-row">
-      <input type="text" id="text-input" placeholder="Enter text or URL..." value="https://example.com">
-      <button id="generate-btn">Generate</button>
+  <div class="card-row">
+    <div class="card">
+      <h2>Generate</h2>
+      <div class="input-row">
+        <input type="text" id="text-input" placeholder="Enter text or URL..." value="https://example.com">
+        <button id="generate-btn">Generate</button>
+      </div>
+      <div class="options">
+        <div class="option">
+          <label>Rings</label>
+          <select id="opt-rings">
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5" selected>5</option>
+            <option value="6">6</option>
+          </select>
+        </div>
+        <div class="option">
+          <label>Segments</label>
+          <select id="opt-segments">
+            <option value="32">32</option>
+            <option value="48" selected>48</option>
+            <option value="64">64</option>
+          </select>
+        </div>
+        <div class="option">
+          <label>ECC Bytes</label>
+          <select id="opt-ecc">
+            <option value="8">8</option>
+            <option value="16" selected>16</option>
+            <option value="32">32</option>
+          </select>
+        </div>
+        <div class="option">
+          <label>Size</label>
+          <input type="number" id="opt-size" value="400" min="100" max="800" step="50">
+        </div>
+      </div>
+      <div id="code-output" class="empty">Enter text and click Generate</div>
+      <div class="download-row" id="download-row" style="display:none">
+        <button id="download-svg">Download SVG</button>
+        <button id="download-png">Download PNG</button>
+      </div>
+      <div class="decode-section">
+        <h2>Decode</h2>
+        <div class="decode-result" id="decode-result"></div>
+        <div class="stats" id="stats"></div>
+      </div>
     </div>
-    <div class="options">
-      <div class="option">
-        <label>Rings</label>
-        <select id="opt-rings">
-          <option value="3">3</option>
-          <option value="4">4</option>
-          <option value="5" selected>5</option>
-          <option value="6">6</option>
-        </select>
-      </div>
-      <div class="option">
-        <label>Segments</label>
-        <select id="opt-segments">
-          <option value="32">32</option>
-          <option value="48" selected>48</option>
-          <option value="64">64</option>
-        </select>
-      </div>
-      <div class="option">
-        <label>ECC Bytes</label>
-        <select id="opt-ecc">
-          <option value="8">8</option>
-          <option value="16" selected>16</option>
-          <option value="32">32</option>
-        </select>
-      </div>
-      <div class="option">
-        <label>Size</label>
-        <input type="number" id="opt-size" value="400" min="100" max="800" step="50">
-      </div>
-    </div>
-    <div id="code-output" class="empty">Enter text and click Generate</div>
-    <div class="download-row" id="download-row" style="display:none">
-      <button id="download-svg">Download SVG</button>
-      <button id="download-png">Download PNG</button>
-    </div>
-  </div>
 
-  <div class="card">
-    <h2>Decode</h2>
-    <p style="font-size:13px; color:#777; margin-bottom:12px">
-      Verifies the generated code by decoding the bits back to text.
-    </p>
-    <div class="decode-result" id="decode-result"></div>
-    <div class="stats" id="stats"></div>
+    <div class="card">
+      <h2>Scan</h2>
+      <p style="font-size:13px; color:#777; margin-bottom:12px">
+        Point your camera at a circular code to decode it.
+      </p>
+      <div class="video-container">
+        <video id="scan-video" playsinline muted></video>
+        <canvas id="scan-overlay"></canvas>
+      </div>
+      <div style="display:flex; gap:10px; margin-top:12px; align-items:center">
+        <button id="scan-btn">Start Camera</button>
+        <button id="stop-scan-btn" style="display:none; background:#5a2d2d; color:#ccc; border:1px solid #733">Stop</button>
+        <div id="scan-status" class="scan-status"></div>
+      </div>
+      <div class="decode-result" id="scan-result" style="margin-top:12px"></div>
+      <div style="margin-top:8px; display:flex; align-items:center; gap:12px">
+        <div id="model-status" style="font-size:12px; color:#555"></div>
+        <label style="font-size:12px; color:#777; display:flex; align-items:center; gap:4px; cursor:pointer">
+          <input type="checkbox" id="toggle-ml" checked> Use ML model
+        </label>
+      </div>
+      <div style="margin-top:12px">
+        <p style="font-size:11px; color:#555; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px">Warped Region</p>
+        <canvas id="debug-warp" width="300" height="300" style="width:100%; max-width:300px; border-radius:8px; border:1px solid #333; background:#111"></canvas>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

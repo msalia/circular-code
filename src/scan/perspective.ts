@@ -119,6 +119,9 @@ function bilinearSample(
   return result;
 }
 
+let warpCanvas: HTMLCanvasElement | null = null;
+let warpCtx: CanvasRenderingContext2D | null = null;
+
 export function warpPerspective(
   srcCanvas: HTMLCanvasElement,
   srcCorners: Point[],
@@ -132,32 +135,63 @@ export function warpPerspective(
   ];
 
   const H = solveHomography(dstCorners, srcCorners);
+  const h0 = H[0], h1 = H[1], h2 = H[2];
+  const h3 = H[3], h4 = H[4], h5 = H[5];
+  const h6 = H[6], h7 = H[7], h8 = H[8];
 
-  const srcCtx = srcCanvas.getContext("2d")!;
-  const srcData = srcCtx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
+  const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true })!;
+  const srcPixels = srcCtx.getImageData(0, 0, srcCanvas.width, srcCanvas.height).data;
+  const srcW = srcCanvas.width;
+  const srcH = srcCanvas.height;
 
-  const outCanvas = document.createElement("canvas");
-  outCanvas.width = outputSize;
-  outCanvas.height = outputSize;
-  const outCtx = outCanvas.getContext("2d")!;
-  const outData = outCtx.createImageData(outputSize, outputSize);
+  if (!warpCanvas) {
+    warpCanvas = document.createElement("canvas");
+  }
+  if (warpCanvas.width !== outputSize || warpCanvas.height !== outputSize) {
+    warpCanvas.width = outputSize;
+    warpCanvas.height = outputSize;
+    warpCtx = null;
+  }
+  if (!warpCtx) {
+    warpCtx = warpCanvas.getContext("2d", { willReadFrequently: true })!;
+  }
+  const outData = warpCtx.createImageData(outputSize, outputSize);
+  const out = outData.data;
 
   for (let dy = 0; dy < outputSize; dy++) {
     for (let dx = 0; dx < outputSize; dx++) {
-      const src = applyHomography(H, dx, dy);
-      if (src.x >= 0 && src.x < srcCanvas.width && src.y >= 0 && src.y < srcCanvas.height) {
-        const pixel = bilinearSample(srcData.data, srcCanvas.width, srcCanvas.height, src.x, src.y);
-        const idx = (dy * outputSize + dx) * 4;
-        outData.data[idx] = pixel[0];
-        outData.data[idx + 1] = pixel[1];
-        outData.data[idx + 2] = pixel[2];
-        outData.data[idx + 3] = pixel[3];
-      }
+      const w = h6 * dx + h7 * dy + h8;
+      const sx = (h0 * dx + h1 * dy + h2) / w;
+      const sy = (h3 * dx + h4 * dy + h5) / w;
+
+      if (sx < 0 || sx >= srcW || sy < 0 || sy >= srcH) continue;
+
+      const x0 = sx | 0;
+      const y0 = sy | 0;
+      const x1 = x0 + 1 < srcW ? x0 + 1 : x0;
+      const y1 = y0 + 1 < srcH ? y0 + 1 : y0;
+      const fx = sx - x0;
+      const fy = sy - y0;
+      const w00 = (1 - fx) * (1 - fy);
+      const w10 = fx * (1 - fy);
+      const w01 = (1 - fx) * fy;
+      const w11 = fx * fy;
+
+      const i00 = (y0 * srcW + x0) * 4;
+      const i10 = (y0 * srcW + x1) * 4;
+      const i01 = (y1 * srcW + x0) * 4;
+      const i11 = (y1 * srcW + x1) * 4;
+
+      const outIdx = (dy * outputSize + dx) * 4;
+      out[outIdx] = srcPixels[i00] * w00 + srcPixels[i10] * w10 + srcPixels[i01] * w01 + srcPixels[i11] * w11;
+      out[outIdx + 1] = srcPixels[i00 + 1] * w00 + srcPixels[i10 + 1] * w10 + srcPixels[i01 + 1] * w01 + srcPixels[i11 + 1] * w11;
+      out[outIdx + 2] = srcPixels[i00 + 2] * w00 + srcPixels[i10 + 2] * w10 + srcPixels[i01 + 2] * w01 + srcPixels[i11 + 2] * w11;
+      out[outIdx + 3] = 255;
     }
   }
 
-  outCtx.putImageData(outData, 0, 0);
-  return outCanvas;
+  warpCtx.putImageData(outData, 0, 0);
+  return warpCanvas;
 }
 
 export function estimateCircleCorners(cx: number, cy: number, r: number): Point[] {

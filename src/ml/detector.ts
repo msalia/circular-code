@@ -4,10 +4,14 @@ import * as tf from "@tensorflow/tfjs";
 
 const MODEL_INPUT_SIZE = 224;
 
-let model: tf.LayersModel | null = null;
+let model: tf.GraphModel | tf.LayersModel | null = null;
 
 export async function loadModel(modelUrl = "/models/circular_code/model.json"): Promise<void> {
-  model = await tf.loadLayersModel(modelUrl);
+  try {
+    model = await tf.loadGraphModel(modelUrl);
+  } catch {
+    model = await tf.loadLayersModel(modelUrl);
+  }
 }
 
 export async function loadModelFromFiles(
@@ -15,9 +19,15 @@ export async function loadModelFromFiles(
   weightSpecs: tf.io.WeightsManifestEntry[],
   weightData: ArrayBuffer,
 ): Promise<void> {
-  model = await tf.loadLayersModel(
-    tf.io.fromMemory({ modelTopology: modelJSON, weightSpecs, weightData }),
-  );
+  try {
+    model = await tf.loadGraphModel(
+      tf.io.fromMemory(modelJSON, weightSpecs, weightData),
+    );
+  } catch {
+    model = await tf.loadLayersModel(
+      tf.io.fromMemory({ modelTopology: modelJSON, weightSpecs, weightData }),
+    );
+  }
 }
 
 export function isModelLoaded(): boolean {
@@ -53,30 +63,23 @@ export function interpretPrediction(
 export function detectWithModel(canvas: HTMLCanvasElement): DetectionResult | null {
   if (!model) return null;
 
-  const tensor = tf.tidy(() => {
-    const ctx = canvas.getContext("2d")!;
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const rgb = new Float32Array(canvas.width * canvas.height * 3);
-    for (let i = 0; i < canvas.width * canvas.height; i++) {
-      rgb[i * 3] = imageData.data[i * 4] / 255;
-      rgb[i * 3 + 1] = imageData.data[i * 4 + 1] / 255;
-      rgb[i * 3 + 2] = imageData.data[i * 4 + 2] / 255;
-    }
-    return tf
-      .tensor3d(rgb, [canvas.height, canvas.width, 3])
-      .resizeNearestNeighbor([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE])
+  let result: DetectionResult | null = null;
+
+  tf.tidy(() => {
+    const input = tf.browser
+      .fromPixels(canvas)
+      .resizeBilinear([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE])
+      .toFloat()
+      .div(127.5)
+      .sub(1)
       .expandDims(0);
+
+    const pred = model instanceof tf.GraphModel
+      ? model.predict(input) as tf.Tensor
+      : (model as tf.LayersModel).predict(input) as tf.Tensor;
+    const values = pred.dataSync();
+    result = interpretPrediction(values, canvas.width, canvas.height);
   });
 
-  try {
-    const pred = model.predict(tensor) as tf.Tensor;
-    const values = pred.dataSync();
-    pred.dispose();
-    tensor.dispose();
-
-    return interpretPrediction(values, canvas.width, canvas.height);
-  } catch {
-    tensor.dispose();
-    return null;
-  }
+  return result;
 }

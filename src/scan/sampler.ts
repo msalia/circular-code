@@ -1,32 +1,36 @@
-import { getSegmentAngle, getSegmentsForRing, isDataRing } from "@/core/layout";
+import { getRingRadius, getSegmentAngle, getSegmentsForRing, isDataRing } from "@/core/layout";
 
 export function samplePolarGrid(
   frame: HTMLCanvasElement,
   cx: number,
   cy: number,
-  radius: number,
+  codeSize: number,
   rings = 5,
   segmentsPerRing = 48,
 ): number[] {
-  const ctx = frame.getContext("2d");
+  const ctx = frame.getContext("2d", { willReadFrequently: true });
   if (!ctx) {
     throw new Error("Unable to sample frame: canvas context unavailable.");
   }
 
+  const { width, height } = frame;
+  const data = ctx.getImageData(0, 0, width, height).data;
   const bits: number[] = [];
-  const ringSpacing = radius / (rings + 1);
 
-  for (let r = 1; r <= rings; r++) {
-    const ringIndex = r - 1;
-    if (!isDataRing(ringIndex)) continue;
-    const segs = getSegmentsForRing(ringIndex, rings, segmentsPerRing);
-    const sampleRadius = r * ringSpacing;
+  for (let r = 0; r < rings; r++) {
+    if (!isDataRing(r)) continue;
+    const segs = getSegmentsForRing(r, rings, segmentsPerRing);
+    const sampleRadius = getRingRadius(r, rings, codeSize);
     for (let segment = 0; segment < segs; segment++) {
       const angle = getSegmentAngle(segment, segs);
       const x = Math.round(cx + sampleRadius * Math.cos(angle));
       const y = Math.round(cy + sampleRadius * Math.sin(angle));
-      const pixel = ctx.getImageData(x, y, 1, 1).data;
-      const brightness = (pixel[0] + pixel[1] + pixel[2]) / 3;
+      if (x < 0 || x >= width || y < 0 || y >= height) {
+        bits.push(0);
+        continue;
+      }
+      const idx = (y * width + x) * 4;
+      const brightness = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
       bits.push(brightness < 128 ? 1 : 0);
     }
   }

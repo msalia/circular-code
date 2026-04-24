@@ -1,14 +1,16 @@
-import type { DetectionResult, ScanOptions, ScanResult } from "@/types";
+import type { DetectionResult, Point, ScanOptions, ScanResult } from "@/types";
 
 import { decode } from "@/core/decoder";
 import { detectWithModel, isModelLoaded, loadModel } from "@/ml/detector";
 import { MultiFrameConsensus } from "@/scan/consensus";
 import { detectCircle } from "@/scan/detector";
 import { scoreFrame } from "@/scan/frameScorer";
-import { normalizeFrame } from "@/scan/normalize";
-import { estimateCircleCorners, warpPerspective } from "@/scan/perspective";
+import { warpPerspective } from "@/scan/perspective";
 import { samplePolarGrid } from "@/scan/sampler";
 import { captureFrame } from "@/utils/image";
+
+const CAPTURE_SIZE = 320;
+const CODE_SIZE = 300;
 
 export async function scanFromVideo(
   video: HTMLVideoElement,
@@ -78,6 +80,37 @@ function detect(canvas: HTMLCanvasElement): DetectionResult {
   return detectCircle(canvas);
 }
 
+function sampleAndDecode(
+  canvas: HTMLCanvasElement,
+  cx: number,
+  cy: number,
+  r: number,
+  rings: number,
+  segmentsPerRing: number,
+  eccBytes: number,
+): string {
+  const pad = r * 1.15;
+  const srcCorners: Point[] = [
+    { x: cx - pad, y: cy - pad },
+    { x: cx + pad, y: cy - pad },
+    { x: cx + pad, y: cy + pad },
+    { x: cx - pad, y: cy + pad },
+  ];
+
+  const rectified = warpPerspective(canvas, srcCorners, CODE_SIZE);
+
+  const bits = samplePolarGrid(
+    rectified,
+    CODE_SIZE / 2,
+    CODE_SIZE / 2,
+    CODE_SIZE,
+    rings,
+    segmentsPerRing,
+  );
+
+  return decode(bits, eccBytes);
+}
+
 export function processFrame(
   video: HTMLVideoElement,
   options: {
@@ -89,37 +122,38 @@ export function processFrame(
 ): ScanResult | null {
   const { rings = 5, segmentsPerRing = 48, eccBytes = 16, minFrameScore = 0.3 } = options;
 
-  const raw = captureFrame(video);
-  const normalized = normalizeFrame(raw);
-  const detection = detect(normalized);
+  const captured = captureFrame(video, CAPTURE_SIZE);
 
-  if (detection.confidence < 0.2) return null;
+  // Try ML/Hough detection first
+  const detection = detect(captured);
 
-  const frameScore = scoreFrame(normalized, detection.cx, detection.cy, detection.r);
+  if (detection.confidence >= 0.2) {
+    const frameScore = scoreFrame(captured, detection.cx, detection.cy, detection.r);
 
-  if (frameScore.overall < minFrameScore) return null;
+    if (frameScore.overall >= minFrameScore) {
+      try {
+        const data = sampleAndDecode(
+          captured, detection.cx, detection.cy, detection.r,
+          rings, segmentsPerRing, eccBytes,
+        );
+        return { data, confidence: detection.confidence, frameScore };
+      } catch {
+        // detection-based decode failed, fall through to center crop
+      }
+    }
+  }
 
-  const corners =
-    detection.corners && detection.corners.length === 4
-      ? detection.corners
-      : estimateCircleCorners(detection.cx, detection.cy, detection.r);
+  // Fallback: assume code is centered in frame
+  const cx = CAPTURE_SIZE / 2;
+  const cy = CAPTURE_SIZE / 2;
+  const r = CAPTURE_SIZE * 0.35;
 
-  const samplingCanvas = warpPerspective(normalized, corners, 320);
-
-  const bits = samplePolarGrid(
-    samplingCanvas,
-    samplingCanvas.width / 2,
-    samplingCanvas.height / 2,
-    samplingCanvas.width * 0.4,
-    rings,
-    segmentsPerRing,
-  );
-
-  const data = decode(bits, eccBytes);
+  const data = sampleAndDecode(captured, cx, cy, r, rings, segmentsPerRing, eccBytes);
+  const frameScore = scoreFrame(captured, cx, cy, r);
 
   return {
     data,
-    confidence: detection.confidence,
+    confidence: 0,
     frameScore,
   };
 }

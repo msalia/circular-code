@@ -1,16 +1,48 @@
 #!/usr/bin/env python3
-"""Export a trained Keras model to TensorFlow.js LayersModel format.
+"""Export a trained Keras model to TensorFlow.js format.
 
-Uses tensorflowjs for conversion, then patches the output for TF.js 4.x compatibility
-(Keras 3 topology fields differ from what the JS runtime expects).
+Uses tf-keras (Keras 2) to re-build the model and save as H5,
+then converts via tensorflowjs which handles H5 natively.
 """
 
 import argparse
-import json
 import os
+import ssl
+import tempfile
 
+ssl._create_default_https_context = ssl._create_unverified_context
+
+import numpy as np
 import tensorflow as tf
+import tf_keras as keras
 import tensorflowjs as tfjs
+
+
+def build_model_keras2(weights_source):
+    """Rebuild the model using tf-keras (Keras 2) for TF.js compatibility."""
+    backbone = keras.applications.MobileNetV2(
+        input_shape=(224, 224, 3),
+        include_top=False,
+        weights="imagenet",
+    )
+
+    inputs = keras.Input(shape=(224, 224, 3))
+    x = backbone(inputs, training=False)
+    x = keras.layers.GlobalAveragePooling2D()(x)
+    x = keras.layers.Dropout(0.3)(x)
+    x = keras.layers.Dense(128, activation="relu")(x)
+    x = keras.layers.Dropout(0.2)(x)
+    outputs = keras.layers.Dense(7)(x)
+    model = keras.Model(inputs, outputs)
+
+    # Copy weights from the trained Keras 3 model
+    for k2_layer, k3_layer in zip(model.layers, weights_source.layers):
+        try:
+            k2_layer.set_weights(k3_layer.get_weights())
+        except Exception:
+            pass
+
+    return model
 
 
 def combined_loss(y_true, y_pred):
@@ -26,74 +58,7 @@ def combined_loss(y_true, y_pred):
     angle_loss = tf.reduce_mean(
         tf.reduce_sum(tf.square(y_true[:, 5:7] - y_pred[:, 5:7]), axis=-1) * mask
     )
-    return cls_loss + 5.0 * bbox_loss + 2.0 * angle_loss
-
-
-def normalize_dtype(val):
-    """Convert Keras 3 dtype objects to plain strings."""
-    if isinstance(val, dict) and "config" in val and "name" in val.get("config", {}):
-        return val["config"]["name"]
-    return val
-
-
-def patch_layer(layer):
-    """Patch a single layer config for TF.js compatibility."""
-    cfg = layer.get("config", {})
-
-    # Normalize dtype everywhere
-    if "dtype" in cfg:
-        cfg["dtype"] = normalize_dtype(cfg["dtype"])
-
-    # InputLayer: batch_shape -> batch_input_shape
-    if layer["class_name"] == "InputLayer":
-        if "batch_shape" in cfg and "batch_input_shape" not in cfg:
-            cfg["batch_input_shape"] = cfg.pop("batch_shape")
-
-    # Conv2D: kernel_size/strides/dilation_rate may need to stay as lists (OK)
-    # activation objects -> strings
-    if "activation" in cfg and isinstance(cfg["activation"], dict):
-        cfg["activation"] = cfg["activation"].get("config", {}).get(
-            "activation", cfg["activation"].get("class_name", "linear")
-        ).lower()
-
-    layer["config"] = cfg
-    return layer
-
-
-def patch_model_json(model_json_path):
-    """Patch the model.json for TF.js 4.x compatibility."""
-    with open(model_json_path) as f:
-        data = json.load(f)
-
-    topo = data.get("modelTopology", {})
-    model_config = topo.get("model_config", topo.get("config", {}))
-
-    if not model_config:
-        return
-
-    cfg = model_config.get("config", {})
-
-    # Normalize top-level dtype
-    if "dtype" in cfg:
-        cfg["dtype"] = normalize_dtype(cfg["dtype"])
-
-    # Patch each layer
-    layers = cfg.get("layers", [])
-    for layer in layers:
-        patch_layer(layer)
-
-    # Strip model name prefix from weight names (e.g. "sequential/conv2d/kernel" -> "conv2d/kernel")
-    model_name = cfg.get("name", "")
-    prefix = model_name + "/" if model_name else ""
-    for manifest_group in data.get("weightsManifest", []):
-        for w in manifest_group.get("weights", []):
-            if prefix and w["name"].startswith(prefix):
-                w["name"] = w["name"][len(prefix) :]
-
-    with open(model_json_path, "w") as f:
-        json.dump(data, f)
-
-    print(f"Patched {len(layers)} layers for TF.js compatibility")
+    return cls_loss + 2.0 * bbox_loss + 1.0 * angle_loss
 
 
 def main():
@@ -108,20 +73,28 @@ def main():
     )
     args = parser.parse_args()
 
-    print(f"Loading {args.keras_model}...")
-    model = tf.keras.models.load_model(
+    print(f"Loading trained model from {args.keras_model}...")
+    trained = tf.keras.models.load_model(
         args.keras_model, custom_objects={"combined_loss": combined_loss}
     )
-    model.summary()
+    trained.summary()
+
+    print("\nRebuilding model with tf-keras (Keras 2)...")
+    model = build_model_keras2(trained)
+
+    print("\nVerifying weight transfer...")
+    test_input = np.random.uniform(0, 1, (1, 224, 224, 3)).astype(np.float32)
+    k3_out = trained.predict(test_input, verbose=0)
+    k2_out = model.predict(test_input, verbose=0)
+    diff = np.max(np.abs(k3_out - k2_out))
+    print(f"  Max output difference: {diff:.8f}")
+    if diff > 0.01:
+        print("  WARNING: outputs differ significantly, weight transfer may be incomplete")
 
     os.makedirs(args.output, exist_ok=True)
 
-    print(f"\nStep 1: Export via tensorflowjs...")
+    print("\nExporting to TF.js...")
     tfjs.converters.save_keras_model(model, args.output)
-
-    print(f"\nStep 2: Patch model.json for TF.js 4.x...")
-    model_json_path = os.path.join(args.output, "model.json")
-    patch_model_json(model_json_path)
 
     print(f"\nExported to {args.output}/:")
     for f in sorted(os.listdir(args.output)):

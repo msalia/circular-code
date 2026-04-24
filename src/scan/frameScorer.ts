@@ -6,7 +6,7 @@ export function scoreFrame(
   cy: number,
   r: number,
 ): FrameScore {
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return { sharpness: 0, contrast: 0, overall: 0 };
 
   const left = Math.max(0, Math.floor(cx - r));
@@ -16,56 +16,40 @@ export function scoreFrame(
 
   if (regionW <= 2 || regionH <= 2) return { sharpness: 0, contrast: 0, overall: 0 };
 
-  const imageData = ctx.getImageData(left, top, regionW, regionH);
-  const gray = toGrayscale(imageData.data, regionW, regionH);
+  const data = ctx.getImageData(left, top, regionW, regionH).data;
 
-  const sharpness = laplacianVariance(gray, regionW, regionH);
-  const contrast = computeContrast(gray);
+  const gray = new Uint8Array(regionW * regionH);
+  for (let i = 0; i < gray.length; i++) {
+    const idx = i * 4;
+    gray[i] = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
+  }
+
+  let lapSum = 0;
+  let lapCount = 0;
+  let sum = 0;
+  let sumSq = 0;
+
+  for (let y = 1; y < regionH - 1; y += 2) {
+    for (let x = 1; x < regionW - 1; x += 2) {
+      const idx = y * regionW + x;
+      const v = gray[idx];
+      const lap = -4 * v + gray[idx - 1] + gray[idx + 1] + gray[idx - regionW] + gray[idx + regionW];
+      lapSum += lap * lap;
+      lapCount++;
+      sum += v;
+      sumSq += v * v;
+    }
+  }
+
+  const sharpness = lapCount > 0 ? lapSum / lapCount : 0;
+  const totalSampled = lapCount;
+  const mean = totalSampled > 0 ? sum / totalSampled : 0;
+  const variance = totalSampled > 0 ? sumSq / totalSampled - mean * mean : 0;
+  const contrast = Math.sqrt(Math.max(0, variance));
 
   const normalizedSharpness = Math.min(sharpness / 500, 1);
   const normalizedContrast = Math.min(contrast / 80, 1);
   const overall = normalizedSharpness * 0.6 + normalizedContrast * 0.4;
 
   return { sharpness, contrast, overall };
-}
-
-function toGrayscale(data: Uint8ClampedArray, width: number, height: number): Float32Array {
-  const gray = new Float32Array(width * height);
-  for (let i = 0; i < width * height; i++) {
-    const idx = i * 4;
-    gray[i] = 0.299 * data[idx] + 0.587 * data[idx + 1] + 0.114 * data[idx + 2];
-  }
-  return gray;
-}
-
-function laplacianVariance(gray: Float32Array, width: number, height: number): number {
-  let sum = 0;
-  let count = 0;
-
-  for (let y = 1; y < height - 1; y++) {
-    for (let x = 1; x < width - 1; x++) {
-      const idx = y * width + x;
-      const laplacian =
-        -4 * gray[idx] + gray[idx - 1] + gray[idx + 1] + gray[idx - width] + gray[idx + width];
-      sum += laplacian * laplacian;
-      count++;
-    }
-  }
-
-  return count > 0 ? sum / count : 0;
-}
-
-function computeContrast(gray: Float32Array): number {
-  if (gray.length === 0) return 0;
-
-  let sum = 0;
-  let sumSq = 0;
-  for (let i = 0; i < gray.length; i++) {
-    sum += gray[i];
-    sumSq += gray[i] * gray[i];
-  }
-
-  const mean = sum / gray.length;
-  const variance = sumSq / gray.length - mean * mean;
-  return Math.sqrt(Math.max(0, variance));
 }

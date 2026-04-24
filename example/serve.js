@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 const DIR = __dirname;
+const ROOT = path.resolve(__dirname, "..");
 const PORT = process.env.PORT || 3000;
 
 const MIME = {
@@ -13,13 +14,16 @@ const MIME = {
   ".map": "application/json",
   ".png": "image/png",
   ".svg": "image/svg+xml",
+  ".bin": "application/octet-stream",
 };
 
 const server = http.createServer((req, res) => {
   let url = req.url.split("?")[0];
   if (url === "/") url = "/index.html";
 
-  const filePath = path.join(DIR, url);
+  const filePath = url.startsWith("/models/")
+    ? path.join(ROOT, url)
+    : path.join(DIR, url);
 
   if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     res.writeHead(404, { "Content-Type": "text/plain" });
