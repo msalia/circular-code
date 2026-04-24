@@ -8,6 +8,8 @@ export { renderCanvas } from "@/render/canvasRenderer";
 export { processFrame, scanFromVideo } from "@/scan";
 export { MultiFrameConsensus } from "@/scan/consensus";
 export { scoreFrame } from "@/scan/frameScorer";
+export { validateCircularCode } from "@/scan/validator";
+export type { ValidationResult } from "@/scan/validator";
 export { estimateCircleCorners, solveHomography, warpPerspective } from "@/scan/perspective";
 export {
   detectWithModel,

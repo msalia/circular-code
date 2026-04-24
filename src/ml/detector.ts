@@ -52,6 +52,10 @@ export function runModelPrediction(
     : ((mdl as tf.LayersModel).predict(input) as tf.Tensor);
 }
 
+function sigmoid(x: number): number {
+  return 1 / (1 + Math.exp(-x));
+}
+
 export function parseDetections(
   outputData: Float32Array | Int32Array | Uint8Array,
   outputShape: number[],
@@ -59,8 +63,9 @@ export function parseDetections(
   frameH: number,
   confThreshold = 0.5,
 ): DetectionResult | null {
-  // YOLOv8-OBB output: [1, 6, N] where channels are [cx, cy, w, h, angle, class_score]
-  // Standard YOLOv8 output: [1, 5, N] where channels are [cx, cy, w, h, class_score]
+  // YOLOv8-OBB output: [1, 6, N] where channels are [cx, cy, w, h, angle, class_logit]
+  // Standard YOLOv8 output: [1, 5, N] where channels are [cx, cy, w, h, class_logit]
+  // Class scores are raw logits — apply sigmoid to get probabilities.
   const channels = outputShape[1];
   const numCandidates = outputShape[2];
   const hasAngle = channels >= 6;
@@ -70,7 +75,7 @@ export function parseDetections(
   let bestIdx = -1;
 
   for (let i = 0; i < numCandidates; i++) {
-    const conf = outputData[confChannel * numCandidates + i];
+    const conf = sigmoid(outputData[confChannel * numCandidates + i]);
     if (conf > bestConf) {
       bestConf = conf;
       bestIdx = i;

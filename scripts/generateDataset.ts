@@ -11,7 +11,7 @@ import { renderSVG } from "@/render/svgRenderer";
 const OUT_DIR = "./dataset";
 const SIZE = 320;
 const POSITIVE_COUNT = 8000;
-const NEGATIVE_COUNT = 2000;
+const NEGATIVE_COUNT = 4000;
 const VAL_RATIO = 0.15;
 
 const ALPHA = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -243,6 +243,139 @@ async function generatePositive(index: number, split: "train" | "val"): Promise<
   fs.writeFileSync(labelPath, label);
 }
 
+function drawConcentricCircles(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxR: number): void {
+  const numRings = randomInt(3, 7);
+  const ringWidth = maxR / numRings;
+  ctx.strokeStyle = randomColor(0, 80);
+  ctx.lineWidth = random(2, 5);
+  for (let i = 1; i <= numRings; i++) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, i * ringWidth, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawBullseye(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxR: number): void {
+  const numRings = randomInt(3, 6);
+  const ringWidth = maxR / numRings;
+  for (let i = numRings; i >= 1; i--) {
+    ctx.fillStyle = i % 2 === 0 ? randomColor(180, 255) : randomColor(0, 80);
+    ctx.beginPath();
+    ctx.arc(cx, cy, i * ringWidth, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function drawSpiral(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxR: number): void {
+  ctx.strokeStyle = randomColor(0, 80);
+  ctx.lineWidth = random(2, 4);
+  ctx.beginPath();
+  const turns = random(3, 6);
+  for (let t = 0; t < turns * Math.PI * 2; t += 0.1) {
+    const r = (t / (turns * Math.PI * 2)) * maxR;
+    const x = cx + r * Math.cos(t);
+    const y = cy + r * Math.sin(t);
+    if (t === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+function drawClockFace(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxR: number): void {
+  ctx.strokeStyle = randomColor(0, 80);
+  ctx.lineWidth = random(2, 4);
+  ctx.beginPath();
+  ctx.arc(cx, cy, maxR, 0, Math.PI * 2);
+  ctx.stroke();
+
+  for (let i = 0; i < 12; i++) {
+    const angle = (i / 12) * Math.PI * 2;
+    const innerR = maxR * 0.85;
+    ctx.beginPath();
+    ctx.moveTo(cx + innerR * Math.cos(angle), cy + innerR * Math.sin(angle));
+    ctx.lineTo(cx + maxR * Math.cos(angle), cy + maxR * Math.sin(angle));
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = randomColor(0, 80);
+  ctx.beginPath();
+  ctx.arc(cx, cy, maxR * 0.05, 0, Math.PI * 2);
+  ctx.fill();
+
+  for (let i = 0; i < 2; i++) {
+    const angle = random(0, Math.PI * 2);
+    const len = random(0.4, 0.8) * maxR;
+    ctx.lineWidth = random(2, 5);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + len * Math.cos(angle), cy + len * Math.sin(angle));
+    ctx.stroke();
+  }
+}
+
+function drawDashedRings(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxR: number): void {
+  const numRings = randomInt(3, 6);
+  const ringWidth = maxR / numRings;
+  ctx.strokeStyle = randomColor(0, 80);
+  ctx.lineWidth = random(2, 5);
+  for (let i = 1; i <= numRings; i++) {
+    const r = i * ringWidth;
+    const numDashes = randomInt(4, 12);
+    const dashAngle = (Math.PI * 2) / numDashes;
+    for (let d = 0; d < numDashes; d++) {
+      const start = d * dashAngle + random(0, 0.1);
+      const end = start + dashAngle * random(0.3, 0.7);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, start, end);
+      ctx.stroke();
+    }
+  }
+}
+
+function drawCenterDotWithRings(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxR: number): void {
+  ctx.fillStyle = randomColor(0, 60);
+  ctx.beginPath();
+  ctx.arc(cx, cy, maxR * 0.1, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = randomColor(0, 80);
+  ctx.lineWidth = random(2, 4);
+  const numRings = randomInt(2, 5);
+  for (let i = 1; i <= numRings; i++) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, (i / numRings) * maxR, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawQRLikeGrid(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxR: number): void {
+  const gridSize = randomInt(5, 10);
+  const cellSize = (maxR * 2) / gridSize;
+  const startX = cx - maxR;
+  const startY = cy - maxR;
+  for (let row = 0; row < gridSize; row++) {
+    for (let col = 0; col < gridSize; col++) {
+      if (Math.random() > 0.5) {
+        ctx.fillStyle = randomColor(0, 60);
+        ctx.fillRect(startX + col * cellSize, startY + row * cellSize, cellSize, cellSize);
+      }
+    }
+  }
+  ctx.strokeStyle = randomColor(0, 60);
+  ctx.lineWidth = 2;
+  ctx.strokeRect(startX, startY, maxR * 2, maxR * 2);
+}
+
+const HARD_NEGATIVE_TYPES = [
+  drawConcentricCircles,
+  drawBullseye,
+  drawSpiral,
+  drawClockFace,
+  drawDashedRings,
+  drawCenterDotWithRings,
+  drawQRLikeGrid,
+];
+
 function generateNegative(index: number, split: "train" | "val"): void {
   const canvas = createCanvas(SIZE, SIZE);
   const ctx = canvas.getContext("2d");
@@ -253,28 +386,22 @@ function generateNegative(index: number, split: "train" | "val"): void {
 
   addBackgroundNoise(ctx, SIZE, SIZE);
 
-  const numDistractors = randomInt(2, 10);
-  for (let i = 0; i < numDistractors; i++) {
-    ctx.strokeStyle = randomColor(0, 100);
-    ctx.lineWidth = random(1, 4);
-    ctx.beginPath();
-    ctx.arc(
-      random(0, SIZE),
-      random(0, SIZE),
-      random(10, 60),
-      random(0, Math.PI * 2),
-      random(0, Math.PI * 2),
-    );
-    ctx.stroke();
-  }
+  const cx = SIZE / 2 + random(-40, 40);
+  const cy = SIZE / 2 + random(-40, 40);
+  const maxR = random(40, 110);
 
-  for (let i = 0; i < randomInt(0, 5); i++) {
-    ctx.strokeStyle = randomColor(0, 150);
-    ctx.lineWidth = random(1, 3);
-    ctx.beginPath();
-    ctx.moveTo(random(0, SIZE), random(0, SIZE));
-    ctx.lineTo(random(0, SIZE), random(0, SIZE));
-    ctx.stroke();
+  const drawFn = HARD_NEGATIVE_TYPES[randomInt(0, HARD_NEGATIVE_TYPES.length - 1)];
+  drawFn(ctx, cx, cy, maxR);
+
+  if (random(0, 1) > 0.5) {
+    for (let i = 0; i < randomInt(1, 4); i++) {
+      ctx.strokeStyle = randomColor(0, 150);
+      ctx.lineWidth = random(1, 3);
+      ctx.beginPath();
+      ctx.moveTo(random(0, SIZE), random(0, SIZE));
+      ctx.lineTo(random(0, SIZE), random(0, SIZE));
+      ctx.stroke();
+    }
   }
 
   addNoisePixels(ctx, SIZE, SIZE);
@@ -282,7 +409,6 @@ function generateNegative(index: number, split: "train" | "val"): void {
   const imgPath = path.join(OUT_DIR, "images", split, `${index}.png`);
   fs.writeFileSync(imgPath, canvas.toBuffer());
 
-  // YOLO: empty label file = no objects
   const labelPath = path.join(OUT_DIR, "labels", split, `${index}.txt`);
   fs.writeFileSync(labelPath, "");
 }

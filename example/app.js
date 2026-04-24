@@ -75655,6 +75655,9 @@ return a / b;`;
   function runModelPrediction(mdl, input2) {
     return mdl instanceof GraphModel ? mdl.predict(input2) : mdl.predict(input2);
   }
+  function sigmoid4(x2) {
+    return 1 / (1 + Math.exp(-x2));
+  }
   function parseDetections(outputData, outputShape, frameW, frameH, confThreshold = 0.5) {
     const channels = outputShape[1];
     const numCandidates = outputShape[2];
@@ -75663,7 +75666,7 @@ return a / b;`;
     let bestConf = confThreshold;
     let bestIdx = -1;
     for (let i = 0; i < numCandidates; i++) {
-      const conf = outputData[confChannel * numCandidates + i];
+      const conf = sigmoid4(outputData[confChannel * numCandidates + i]);
       if (conf > bestConf) {
         bestConf = conf;
         bestIdx = i;
@@ -75947,43 +75950,6 @@ return a / b;`;
     }));
   }
 
-  // src/scan/frameScorer.ts
-  function scoreFrame(canvas, cx, cy, r) {
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return { sharpness: 0, contrast: 0, overall: 0 };
-    const left = Math.max(0, Math.floor(cx - r));
-    const top = Math.max(0, Math.floor(cy - r));
-    const regionW = Math.min(Math.ceil(r * 2), canvas.width - left);
-    const regionH = Math.min(Math.ceil(r * 2), canvas.height - top);
-    if (regionW <= 2 || regionH <= 2) return { sharpness: 0, contrast: 0, overall: 0 };
-    const data = ctx.getImageData(left, top, regionW, regionH).data;
-    const gray = toGrayscale(data, regionW * regionH);
-    let lapSum = 0;
-    let lapCount = 0;
-    let sum5 = 0;
-    let sumSq = 0;
-    for (let y = 1; y < regionH - 1; y += 2) {
-      for (let x2 = 1; x2 < regionW - 1; x2 += 2) {
-        const idx = y * regionW + x2;
-        const v = gray[idx];
-        const lap = -4 * v + gray[idx - 1] + gray[idx + 1] + gray[idx - regionW] + gray[idx + regionW];
-        lapSum += lap * lap;
-        lapCount++;
-        sum5 += v;
-        sumSq += v * v;
-      }
-    }
-    const sharpness = lapCount > 0 ? lapSum / lapCount : 0;
-    const totalSampled = lapCount;
-    const mean3 = totalSampled > 0 ? sum5 / totalSampled : 0;
-    const variance = totalSampled > 0 ? sumSq / totalSampled - mean3 * mean3 : 0;
-    const contrast = Math.sqrt(Math.max(0, variance));
-    const normalizedSharpness = Math.min(sharpness / 500, 1);
-    const normalizedContrast = Math.min(contrast / 80, 1);
-    const overall = normalizedSharpness * 0.6 + normalizedContrast * 0.4;
-    return { sharpness, contrast, overall };
-  }
-
   // src/scan/sampler.ts
   function samplePolarGrid(frame2, cx, cy, codeSize, rings = 5, segmentsPerRing = 48) {
     const ctx = frame2.getContext("2d", { willReadFrequently: true });
@@ -76013,62 +75979,104 @@ return a / b;`;
     return bits;
   }
 
-  // src/scan/index.ts
-  var CAPTURE_SIZE = 320;
-  var CODE_SIZE = 300;
-  function detect(canvas) {
-    if (isModelLoaded()) {
-      const mlResult = detectWithModel(canvas);
-      if (mlResult) return mlResult;
-    }
-    return detectCircle(canvas);
+  // src/scan/validator.ts
+  function validateCircularCode(canvas, rings, size, threshold3 = 0.5) {
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return { valid: false, centerDot: false, ringContrast: false, segmentPattern: false, score: 0 };
+    const { width, height } = canvas;
+    const data = ctx.getImageData(0, 0, width, height).data;
+    const gray = toGrayscale(data, width * height);
+    const cx = width / 2;
+    const cy = height / 2;
+    const centerDot = checkCenterDot(gray, width, cx, cy, rings, size);
+    const ringContrast = checkRingContrast(gray, width, cx, cy, rings, size);
+    const segmentPattern = checkSegmentPattern(gray, width, cx, cy, rings, size);
+    const score = (centerDot ? 0.35 : 0) + (ringContrast ? 0.35 : 0) + (segmentPattern ? 0.3 : 0);
+    return {
+      valid: score >= threshold3,
+      centerDot,
+      ringContrast,
+      segmentPattern,
+      score
+    };
   }
-  function sampleAndDecode(canvas, cx, cy, r, rings, segmentsPerRing, eccBytes, angle = 0) {
-    const srcCorners = estimateCircleCorners(cx, cy, r, 1.15, angle);
-    const rectified = warpPerspective(canvas, srcCorners, CODE_SIZE);
-    const bits = samplePolarGrid(
-      rectified,
-      CODE_SIZE / 2,
-      CODE_SIZE / 2,
-      CODE_SIZE,
-      rings,
-      segmentsPerRing
-    );
-    return decode(bits, eccBytes);
+  function sampleGray(gray, width, x2, y) {
+    const ix = Math.round(x2);
+    const iy = Math.round(y);
+    if (ix < 0 || ix >= width || iy < 0 || iy >= gray.length / width) return 128;
+    return gray[iy * width + ix];
   }
-  function processFrame(video, options = {}) {
-    const { rings = 5, segmentsPerRing = 48, eccBytes = 16, minFrameScore = 0.3 } = options;
-    const captured = captureFrame(video, CAPTURE_SIZE);
-    const detection = detect(captured);
-    if (detection.confidence >= 0.2) {
-      const frameScore2 = scoreFrame(captured, detection.cx, detection.cy, detection.r);
-      if (frameScore2.overall >= minFrameScore) {
-        try {
-          const data2 = sampleAndDecode(
-            captured,
-            detection.cx,
-            detection.cy,
-            detection.r,
-            rings,
-            segmentsPerRing,
-            eccBytes,
-            detection.angle ?? 0
-          );
-          return { data: data2, confidence: detection.confidence, frameScore: frameScore2 };
-        } catch {
-        }
+  function checkCenterDot(gray, width, cx, cy, rings, size) {
+    const dotRadius = getRingWidth(rings, size) * 0.6;
+    const sampleRadius = dotRadius * 0.5;
+    let centerSum = 0;
+    let centerCount = 0;
+    for (let dy = -sampleRadius; dy <= sampleRadius; dy += 2) {
+      for (let dx = -sampleRadius; dx <= sampleRadius; dx += 2) {
+        if (dx * dx + dy * dy > sampleRadius * sampleRadius) continue;
+        centerSum += sampleGray(gray, width, cx + dx, cy + dy);
+        centerCount++;
       }
     }
-    const cx = CAPTURE_SIZE / 2;
-    const cy = CAPTURE_SIZE / 2;
-    const r = CAPTURE_SIZE * 0.35;
-    const data = sampleAndDecode(captured, cx, cy, r, rings, segmentsPerRing, eccBytes);
-    const frameScore = scoreFrame(captured, cx, cy, r);
-    return {
-      data,
-      confidence: 0,
-      frameScore
-    };
+    const centerBrightness = centerCount > 0 ? centerSum / centerCount : 128;
+    let bgSum = 0;
+    let bgCount = 0;
+    const bgRadius = size * 0.45;
+    for (let a = 0; a < 8; a++) {
+      const angle = a / 8 * Math.PI * 2;
+      const x2 = cx + bgRadius * Math.cos(angle);
+      const y = cy + bgRadius * Math.sin(angle);
+      bgSum += sampleGray(gray, width, x2, y);
+      bgCount++;
+    }
+    const bgBrightness = bgCount > 0 ? bgSum / bgCount : 200;
+    return centerBrightness < bgBrightness - 30;
+  }
+  function checkRingContrast(gray, width, cx, cy, rings, size) {
+    const numAngles = 16;
+    const ringWidth = getRingWidth(rings, size);
+    let transitions = 0;
+    for (let a = 0; a < numAngles; a++) {
+      const angle = a / numAngles * Math.PI * 2;
+      let prevBright = 128;
+      let transitionsOnRay = 0;
+      for (let r = 0; r < rings + 2; r++) {
+        const radius = (r + 0.5) * ringWidth;
+        const x2 = cx + radius * Math.cos(angle);
+        const y = cy + radius * Math.sin(angle);
+        const bright = sampleGray(gray, width, x2, y);
+        if (Math.abs(bright - prevBright) > 40) transitionsOnRay++;
+        prevBright = bright;
+      }
+      if (transitionsOnRay >= 2) transitions++;
+    }
+    return transitions >= numAngles * 0.4;
+  }
+  function checkSegmentPattern(gray, width, cx, cy, rings, size) {
+    let ringsWithGaps = 0;
+    for (let r = 1; r < rings; r++) {
+      const radius = getRingRadius(r, rings, size);
+      const numSamples = 32;
+      const samples = [];
+      for (let s = 0; s < numSamples; s++) {
+        const angle = s / numSamples * Math.PI * 2;
+        const x2 = cx + radius * Math.cos(angle);
+        const y = cy + radius * Math.sin(angle);
+        samples.push(sampleGray(gray, width, x2, y));
+      }
+      let darkRuns = 0;
+      let lightRuns = 0;
+      const median = [...samples].sort((a, b) => a - b)[numSamples >> 1];
+      let inDark = samples[0] < median;
+      for (let s = 1; s < numSamples; s++) {
+        const nowDark = samples[s] < median;
+        if (nowDark && !inDark) darkRuns++;
+        if (!nowDark && inDark) lightRuns++;
+        inDark = nowDark;
+      }
+      if (darkRuns >= 2 && lightRuns >= 2) ringsWithGaps++;
+    }
+    return ringsWithGaps >= Math.max(1, (rings - 1) * 0.4);
   }
 
   // example/app.ts
@@ -76162,10 +76170,11 @@ return a / b;`;
   var scanResult = document.getElementById("scan-result");
   var stream = null;
   var scanning = false;
+  var paused = false;
   var useMLModel = true;
   var frameCount = 0;
-  var detectCount = 0;
   var decodeCount = 0;
+  var resumeBtn = document.getElementById("resume-btn");
   async function startScan() {
     if (stream) return;
     try {
@@ -76175,11 +76184,12 @@ return a / b;`;
       scanVideo.srcObject = stream;
       await scanVideo.play();
       scanning = true;
+      paused = false;
       frameCount = 0;
-      detectCount = 0;
       decodeCount = 0;
       scanBtn.style.display = "none";
       stopScanBtn.style.display = "inline-block";
+      resumeBtn.style.display = "none";
       scanStatus.className = "scan-status active";
       const modelStatus = document.getElementById("model-status");
       if (!isModelLoaded()) {
@@ -76209,10 +76219,21 @@ return a / b;`;
       scanStatus.className = "scan-status error";
     }
   }
+  function resumeScan() {
+    if (!stream || !paused) return;
+    paused = false;
+    scanVideo.play();
+    resumeBtn.style.display = "none";
+    scanResult.textContent = "";
+    scanResult.className = "decode-result";
+    scanStatus.textContent = "Scanning...";
+    scanStatus.className = "scan-status active";
+    scanLoop();
+  }
   var lastScanTime = 0;
   var SCAN_INTERVAL_MS = 200;
   function scanLoop() {
-    if (!scanning) return;
+    if (!scanning || paused) return;
     const now2 = performance.now();
     if (now2 - lastScanTime < SCAN_INTERVAL_MS) {
       requestAnimationFrame(scanLoop);
@@ -76227,19 +76248,32 @@ return a / b;`;
     if (overlay.height !== videoH) overlay.height = videoH;
     const octx = overlay.getContext("2d");
     octx.clearRect(0, 0, overlay.width, overlay.height);
+    const side = Math.min(videoW, videoH);
+    const guideX = (videoW - side) / 2;
+    const guideY = (videoH - side) / 2;
+    octx.strokeStyle = "#ffffff30";
+    octx.lineWidth = 2;
+    octx.strokeRect(guideX, guideY, side, side);
     const captureSize = 320;
     const captured = captureFrame(scanVideo, captureSize);
-    const scaleX = videoW / captureSize;
-    const scaleY = videoH / captureSize;
+    const scaleX = side / captureSize;
+    const offsetX = guideX;
+    const offsetY = guideY;
     const detection = useMLModel && isModelLoaded() ? detectWithModel(captured) ?? detectCircle(captured) : detectCircle(captured);
-    octx.strokeStyle = detection.confidence > 0.5 ? "#00ff00" : detection.confidence > 0.2 ? "#ffff00" : "#ff0000";
+    octx.strokeStyle = detection.confidence > 0.9 ? "#00ff00" : detection.confidence > 0.5 ? "#ffff00" : "#ff0000";
     octx.lineWidth = 3;
     octx.beginPath();
-    octx.arc(detection.cx * scaleX, detection.cy * scaleY, detection.r * scaleX, 0, Math.PI * 2);
+    octx.arc(
+      offsetX + detection.cx * scaleX,
+      offsetY + detection.cy * scaleX,
+      detection.r * scaleX,
+      0,
+      Math.PI * 2
+    );
     octx.stroke();
     octx.fillStyle = octx.strokeStyle;
     octx.font = "14px monospace";
-    const angleDeg = detection.angle != null ? ` ang: ${(detection.angle * 180 / Math.PI).toFixed(0)}\xB0` : "";
+    const angleDeg = detection.angle != null ? ` ang: ${(detection.angle * 180 / Math.PI).toFixed(0)}` : "";
     octx.fillText(
       `conf: ${(detection.confidence * 100).toFixed(0)}% r: ${detection.r.toFixed(0)} (${detection.cx.toFixed(0)},${detection.cy.toFixed(0)})${angleDeg}`,
       8,
@@ -76250,7 +76284,7 @@ return a / b;`;
     const codeSize = 300;
     if (debugCanvas.width !== codeSize) debugCanvas.width = codeSize;
     if (debugCanvas.height !== codeSize) debugCanvas.height = codeSize;
-    const useDet = detection.confidence >= 0.2;
+    const useDet = detection.confidence >= 0.5;
     const warpCx = useDet ? detection.cx : captureSize / 2;
     const warpCy = useDet ? detection.cy : captureSize / 2;
     const warpR = useDet ? detection.r : captureSize * 0.35;
@@ -76258,46 +76292,65 @@ return a / b;`;
     const srcCorners = estimateCircleCorners(warpCx, warpCy, warpR, 1.15, warpAngle);
     const warped = warpPerspective(captured, srcCorners, codeSize);
     debugCtx.drawImage(warped, 0, 0);
-    if (!useDet) {
-      octx.strokeStyle = "#0088ff";
-      octx.lineWidth = 2;
-      octx.setLineDash([6, 4]);
-      octx.beginPath();
-      octx.arc(videoW / 2, videoH / 2, warpR * scaleX, 0, Math.PI * 2);
-      octx.stroke();
-      octx.setLineDash([]);
+    const rings = parseInt(optRings.value);
+    const segmentsPerRing = parseInt(optSegments.value);
+    const bits = samplePolarGrid(warped, codeSize / 2, codeSize / 2, codeSize, rings, segmentsPerRing);
+    let bitIdx = 0;
+    for (let r = 0; r < rings; r++) {
+      if (!isDataRing(r)) continue;
+      const segs = getSegmentsForRing(r, rings, segmentsPerRing);
+      const radius = getRingRadius(r, rings, codeSize);
+      for (let s = 0; s < segs; s++) {
+        const bit = bits[bitIdx++] ?? 0;
+        const angle = getSegmentAngle(s, segs);
+        const x2 = codeSize / 2 + radius * Math.cos(angle);
+        const y = codeSize / 2 + radius * Math.sin(angle);
+        debugCtx.fillStyle = bit ? "#00ff00" : "#ff000080";
+        debugCtx.beginPath();
+        debugCtx.arc(x2, y, 2, 0, Math.PI * 2);
+        debugCtx.fill();
+      }
     }
-    const opts = {
-      rings: parseInt(optRings.value),
-      segmentsPerRing: parseInt(optSegments.value),
-      eccBytes: parseInt(optEcc.value),
-      minFrameScore: 0.01
-    };
+    const eccBytes = parseInt(optEcc.value);
+    const validation = validateCircularCode(warped, rings, codeSize);
     let stage = useDet ? "detected" : "center-crop";
-    try {
-      const result = processFrame(scanVideo, opts);
-      if (result) {
+    octx.fillStyle = validation.valid ? "#00ff0080" : "#ff000040";
+    octx.font = "12px monospace";
+    octx.fillText(
+      `valid: ${validation.valid ? "YES" : "no"} (${validation.score.toFixed(2)}) dot:${validation.centerDot ? "Y" : "n"} ring:${validation.ringContrast ? "Y" : "n"} seg:${validation.segmentPattern ? "Y" : "n"}`,
+      8,
+      videoH - 8
+    );
+    if (validation.valid) {
+      try {
+        const decoded = decode(bits, eccBytes);
         decodeCount++;
-        stage = result.confidence > 0 ? "decoded (detected)" : "decoded (center)";
-        scanResult.textContent = result.data;
+        scanResult.textContent = decoded;
         scanResult.className = "decode-result success";
-        scanStatus.textContent = `Decoded on frame ${frameCount}`;
+        scanStatus.textContent = `Decoded: "${decoded}"`;
         scanStatus.className = "scan-status active";
         octx.fillStyle = "#00ff00";
-        octx.fillText(`DECODED: ${result.data}`, 8, 40);
-        stopScan();
+        octx.font = "14px monospace";
+        octx.fillText(`DECODED: ${decoded}`, 8, 40);
+        paused = true;
+        scanVideo.pause();
+        resumeBtn.style.display = "inline-block";
         return;
+      } catch (e) {
+        stage += ` | ${e.message.slice(0, 50)}`;
       }
-    } catch (e) {
-      stage += ` | ${e.message.slice(0, 50)}`;
+    } else {
+      stage += " | not a circular code";
     }
     octx.fillStyle = "#ffffff";
-    octx.fillText(`mode: ${useDet ? "detected" : "center-crop"}`, 8, 40);
+    octx.font = "14px monospace";
+    octx.fillText(`f:${frameCount} | ${stage}`, 8, 40);
     scanStatus.textContent = `f:${frameCount} | ${stage}`;
     requestAnimationFrame(scanLoop);
   }
   function stopScan() {
     scanning = false;
+    paused = false;
     if (stream) {
       stream.getTracks().forEach((t) => t.stop());
       stream = null;
@@ -76305,6 +76358,7 @@ return a / b;`;
     scanVideo.srcObject = null;
     scanBtn.style.display = "inline-block";
     stopScanBtn.style.display = "none";
+    resumeBtn.style.display = "none";
     if (decodeCount === 0) {
       scanStatus.textContent = `No codes detected in ${frameCount} frames`;
       scanStatus.className = "scan-status error";
@@ -76312,6 +76366,7 @@ return a / b;`;
   }
   scanBtn.addEventListener("click", startScan);
   stopScanBtn.addEventListener("click", stopScan);
+  resumeBtn.addEventListener("click", resumeScan);
   document.getElementById("toggle-ml").addEventListener("change", (e) => {
     useMLModel = e.target.checked;
   });

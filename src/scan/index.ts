@@ -7,6 +7,7 @@ import { detectCircle } from "@/scan/detector";
 import { scoreFrame } from "@/scan/frameScorer";
 import { estimateCircleCorners, warpPerspective } from "@/scan/perspective";
 import { samplePolarGrid } from "@/scan/sampler";
+import { validateCircularCode } from "@/scan/validator";
 import { captureFrame } from "@/utils/image";
 
 const CAPTURE_SIZE = 320;
@@ -94,6 +95,11 @@ function sampleAndDecode(
 
   const rectified = warpPerspective(canvas, srcCorners, CODE_SIZE);
 
+  const validation = validateCircularCode(rectified, rings, CODE_SIZE);
+  if (!validation.valid) {
+    throw new Error(`Not a circular code (score=${validation.score.toFixed(2)})`);
+  }
+
   const bits = samplePolarGrid(
     rectified,
     CODE_SIZE / 2,
@@ -122,7 +128,7 @@ export function processFrame(
   // Try ML/Hough detection first
   const detection = detect(captured);
 
-  if (detection.confidence >= 0.2) {
+  if (detection.confidence >= 0.5) {
     const frameScore = scoreFrame(captured, detection.cx, detection.cy, detection.r);
 
     if (frameScore.overall >= minFrameScore) {
