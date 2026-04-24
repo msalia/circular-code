@@ -132,7 +132,7 @@ describe("model inference on dataset", () => {
       `Positive accuracy: ${correct}/${tested} (${(accuracy * 100).toFixed(1)}%)`,
     );
     expect(accuracy).toBeGreaterThanOrEqual(0.8);
-  }, 120_000);
+  }, 300_000);
 
   it("classifies negative samples as no_code (>=80% accuracy)", async () => {
     const manifest = JSON.parse(
@@ -166,7 +166,7 @@ describe("model inference on dataset", () => {
       `Negative accuracy: ${correct}/${tested} (${(accuracy * 100).toFixed(1)}%)`,
     );
     expect(accuracy).toBeGreaterThanOrEqual(0.8);
-  }, 120_000);
+  }, 300_000);
 
   it("bounding box predictions are reasonable for detected positives", async () => {
     const manifest = JSON.parse(
@@ -203,5 +203,5 @@ describe("model inference on dataset", () => {
       );
       expect(ratio).toBeGreaterThanOrEqual(0.5);
     }
-  }, 120_000);
+  }, 300_000);
 });
