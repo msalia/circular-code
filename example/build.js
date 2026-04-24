@@ -11,6 +11,7 @@ build({
   alias: {
     "@": path.resolve(__dirname, "..", "src"),
   },
+  external: ["fs", "path"],
   sourcemap: true,
 }).then(() => {
   console.log("Built example/app.js");

@@ -5,10 +5,10 @@ import { renderSVG } from "@/render/svgRenderer";
 import { renderCanvas } from "@/render/canvasRenderer";
 import { loadModel, isModelLoaded, detectWithModel } from "@/ml/detector";
 import { detectCircle } from "@/scan/detector";
-import { warpPerspective } from "@/scan/perspective";
+import { estimateCircleCorners, warpPerspective } from "@/scan/perspective";
 import { captureFrame } from "@/utils/image";
 import { processFrame } from "@/scan/index";
-import type { EncodedCode, Point } from "@/types";
+import type { EncodedCode } from "@/types";
 
 let lastCode: EncodedCode | null = null;
 let lastSvg = "";
@@ -206,8 +206,9 @@ function scanLoop() {
 
   octx.fillStyle = octx.strokeStyle;
   octx.font = "14px monospace";
+  const angleDeg = detection.angle != null ? ` ang: ${(detection.angle * 180 / Math.PI).toFixed(0)}°` : "";
   octx.fillText(
-    `conf: ${(detection.confidence * 100).toFixed(0)}% r: ${detection.r.toFixed(0)} (${detection.cx.toFixed(0)},${detection.cy.toFixed(0)})`,
+    `conf: ${(detection.confidence * 100).toFixed(0)}% r: ${detection.r.toFixed(0)} (${detection.cx.toFixed(0)},${detection.cy.toFixed(0)})${angleDeg}`,
     8, 20
   );
 
@@ -222,13 +223,8 @@ function scanLoop() {
   const warpCx = useDet ? detection.cx : captureSize / 2;
   const warpCy = useDet ? detection.cy : captureSize / 2;
   const warpR = useDet ? detection.r : captureSize * 0.35;
-  const pad = warpR * 1.15;
-  const srcCorners: Point[] = [
-    { x: warpCx - pad, y: warpCy - pad },
-    { x: warpCx + pad, y: warpCy - pad },
-    { x: warpCx + pad, y: warpCy + pad },
-    { x: warpCx - pad, y: warpCy + pad },
-  ];
+  const warpAngle = useDet ? (detection.angle ?? 0) : 0;
+  const srcCorners = estimateCircleCorners(warpCx, warpCy, warpR, 1.15, warpAngle);
   const warped = warpPerspective(captured, srcCorners, codeSize);
   debugCtx.drawImage(warped, 0, 0);
 

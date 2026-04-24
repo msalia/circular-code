@@ -30,7 +30,6 @@ async function preprocessImageAsync(imgPath: string): Promise<tf.Tensor4D> {
   for (let i = 0; i < totalPixels; i++) {
     const src = i * 4;
     const dst = i * 3;
-    // YOLO normalization: [0, 1]
     data[dst] = pixels[src] / 255.0;
     data[dst + 1] = pixels[src + 1] / 255.0;
     data[dst + 2] = pixels[src + 2] / 255.0;
@@ -45,19 +44,34 @@ function predict(input: tf.Tensor4D): { data: Float32Array | Int32Array | Uint8A
   });
 }
 
-function loadLabel(index: number, split: "train" | "val"): number[] | null {
-  const labelPath = path.join(DATASET_DIR, "labels", split, `${index}.txt`);
-  const raw = fs.readFileSync(labelPath, "utf-8").trim();
-  if (raw === "") return null;
-  return raw.split(/\s+/).map(Number);
-}
-
 function findImagePath(index: number): { path: string; split: "train" | "val" } | null {
   for (const split of ["train", "val"] as const) {
     const p = path.join(DATASET_DIR, "images", split, `${index}.png`);
     if (fs.existsSync(p)) return { path: p, split };
   }
   return null;
+}
+
+function loadLabel(index: number, split: "train" | "val"): { hasObject: boolean; cx: number; cy: number } {
+  const labelPath = path.join(DATASET_DIR, "labels", split, `${index}.txt`);
+  const raw = fs.readFileSync(labelPath, "utf-8").trim();
+  if (raw === "") return { hasObject: false, cx: 0, cy: 0 };
+
+  const parts = raw.split(/\s+/).map(Number);
+
+  if (parts.length === 9) {
+    // OBB format: class_id x1 y1 x2 y2 x3 y3 x4 y4
+    const cx = (parts[1] + parts[3] + parts[5] + parts[7]) / 4;
+    const cy = (parts[2] + parts[4] + parts[6] + parts[8]) / 4;
+    return { hasObject: true, cx, cy };
+  }
+
+  if (parts.length === 5) {
+    // Standard YOLO: class_id cx cy w h
+    return { hasObject: true, cx: parts[1], cy: parts[2] };
+  }
+
+  return { hasObject: true, cx: 0.5, cy: 0.5 };
 }
 
 describe("model inference on dataset", () => {
@@ -82,10 +96,11 @@ describe("model inference on dataset", () => {
     const input = await preprocessImageAsync(found.path);
     const { data, shape } = predict(input);
     input.dispose();
-    // YOLO output: [1, 5, N]
+    // YOLO output: [1, channels, N] where channels is 5 (detect) or 6 (OBB)
     expect(shape.length).toBe(3);
     expect(shape[0]).toBe(1);
-    expect(shape[1]).toBe(5);
+    expect(shape[1]).toBeGreaterThanOrEqual(5);
+    expect(shape[1]).toBeLessThanOrEqual(6);
     console.log(`Output shape: [${shape.join(", ")}]`);
   });
 
@@ -108,7 +123,7 @@ describe("model inference on dataset", () => {
 
       const label = loadLabel(i, found.split);
       const detection = parseDetections(data, shape, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
-      if (label !== null && detection !== null) correct++;
+      if (label.hasObject && detection !== null) correct++;
       tested++;
     }
 
@@ -172,10 +187,10 @@ describe("model inference on dataset", () => {
 
       const label = loadLabel(i, found.split);
       const detection = parseDetections(data, shape, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
-      if (!detection || !label) continue;
+      if (!detection || !label.hasObject) continue;
 
-      const cxErr = Math.abs(detection.cx / MODEL_INPUT_SIZE - label[1]);
-      const cyErr = Math.abs(detection.cy / MODEL_INPUT_SIZE - label[2]);
+      const cxErr = Math.abs(detection.cx / MODEL_INPUT_SIZE - label.cx);
+      const cyErr = Math.abs(detection.cy / MODEL_INPUT_SIZE - label.cy);
 
       if (cxErr < 0.2 && cyErr < 0.2) withinThreshold++;
       tested++;
