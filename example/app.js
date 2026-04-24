@@ -75695,12 +75695,7 @@ return a / b;`;
       const pred = runModelPrediction(model2, input2);
       const data = pred.dataSync();
       const shape = pred.shape;
-      result = parseDetections(
-        data,
-        shape,
-        canvas.width,
-        canvas.height
-      );
+      result = parseDetections(data, shape, canvas.width, canvas.height);
     });
     return result;
   }
@@ -75724,7 +75719,7 @@ return a / b;`;
   }
 
   // src/utils/image.ts
-  function captureFrame(video, targetSize = 224) {
+  function captureFrame(video, targetSize = 320) {
     const { canvas, ctx } = getOrCreateCanvas(targetSize, "captureFrame", {
       willReadFrequently: true
     });

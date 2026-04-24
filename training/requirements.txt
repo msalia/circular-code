@@ -1,5 +1,5 @@
-tensorflow>=2.14,<2.20
-tensorflow-metal>=1.0,<1.3
-Pillow
+ultralytics>=8.4
+tensorflowjs
 numpy
+Pillow
 setuptools<81

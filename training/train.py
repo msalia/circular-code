@@ -6,7 +6,7 @@ Usage:
     python training/train.py
     python training/train.py --epochs 50
     python training/train.py --dataset ./dataset --output ./models/circular_code
-    python training/train.py --resume runs/train/circular_code/weights/best.pt
+    python training/train.py --resume runs/obb/runs/train/circular_code/weights/best.pt
 """
 
 import argparse

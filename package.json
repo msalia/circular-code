@@ -9,7 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "generate-dataset": "rm -rf dataset/images dataset/labels dataset/data.yaml && node dist/scripts/generateDataset.js",
-    "train": "node dist/scripts/trainModel.js",
+    "train": "python training/train.py",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write 'src/**/*.ts' 'scripts/**/*.ts'",
     "format:check": "prettier --check 'src/**/*.ts' 'scripts/**/*.ts'",

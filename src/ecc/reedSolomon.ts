@@ -1,4 +1,4 @@
-import { EXP_TABLE, generatorPoly, gfDiv, gfInverse, gfMul, gfPolyMul } from "@/ecc/galoisField";
+import { EXP_TABLE, generatorPoly, gfDiv, gfInverse, gfMul } from "@/ecc/galoisField";
 
 export function rsEncode(data: Uint8Array, eccBytes = 16): Uint8Array {
   const gen = generatorPoly(eccBytes);

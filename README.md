@@ -41,6 +41,7 @@ training/
   setup_venv.sh        Virtual environment setup script
 
 tests/                 Vitest unit and integration tests
+models/yolov8n-obb.pt  Base YOLO model (downloaded once, reused across runs)
 models/circular_code/  Trained TF.js model output
 dataset/               Generated training images and labels (YOLO OBB format)
 example/               Browser demo app (esbuild + local server)
@@ -68,7 +69,7 @@ Compiles TypeScript to `dist/` and resolves `@/` path aliases for Node.js.
 npm test
 ```
 
-Runs 67 tests covering bitstream, encoder/decoder roundtrips, Reed-Solomon error correction, perspective math, multi-frame consensus, SVG rendering, YOLO detection parsing, and end-to-end flows.
+Runs 67+ tests covering bitstream, encoder/decoder roundtrips, Reed-Solomon error correction, perspective math, multi-frame consensus, SVG rendering, YOLO detection parsing, and end-to-end flows. An additional model inference test suite validates detection accuracy against the dataset.
 
 ### Type Check
 
@@ -150,13 +151,12 @@ The detector uses a YOLOv8-nano OBB (Oriented Bounding Box) model that locates c
 
 ### Prerequisites
 
-Python 3.9+ with ultralytics and TensorFlow.js export support:
+Python 3.9+ with ultralytics:
 
 ```bash
 cd training
 bash setup_venv.sh
 source venv/bin/activate
-pip install ultralytics tensorflowjs
 ```
 
 ### Step 1: Generate Training Data
@@ -224,9 +224,7 @@ npm run build
 npm test
 
 # Set up training environment
-cd training && bash setup_venv.sh && source venv/bin/activate
-pip install ultralytics tensorflowjs
-cd ..
+cd training && bash setup_venv.sh && source venv/bin/activate && cd ..
 
 # Generate dataset and train
 npm run build

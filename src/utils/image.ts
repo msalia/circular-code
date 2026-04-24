@@ -1,6 +1,6 @@
 import { getOrCreateCanvas } from "@/utils/canvas";
 
-export function captureFrame(video: HTMLVideoElement, targetSize = 224): HTMLCanvasElement {
+export function captureFrame(video: HTMLVideoElement, targetSize = 320): HTMLCanvasElement {
   const { canvas, ctx } = getOrCreateCanvas(targetSize, "captureFrame", {
     willReadFrequently: true,
   });
