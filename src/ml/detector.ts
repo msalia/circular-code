@@ -117,12 +117,7 @@ export function detectWithModel(canvas: HTMLCanvasElement): DetectionResult | nu
     const pred = runModelPrediction(model!, input);
     const data = pred.dataSync();
     const shape = pred.shape;
-    result = parseDetections(
-      data,
-      shape as number[],
-      canvas.width,
-      canvas.height,
-    );
+    result = parseDetections(data, shape as number[], canvas.width, canvas.height);
   });
 
   return result;

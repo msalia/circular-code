@@ -128,8 +128,14 @@ export function processFrame(
     if (frameScore.overall >= minFrameScore) {
       try {
         const data = sampleAndDecode(
-          captured, detection.cx, detection.cy, detection.r,
-          rings, segmentsPerRing, eccBytes, detection.angle ?? 0,
+          captured,
+          detection.cx,
+          detection.cy,
+          detection.r,
+          rings,
+          segmentsPerRing,
+          eccBytes,
+          detection.angle ?? 0,
         );
         return { data, confidence: detection.confidence, frameScore };
       } catch {

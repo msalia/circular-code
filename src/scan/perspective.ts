@@ -92,9 +92,15 @@ export function warpPerspective(
   ];
 
   const H = solveHomography(dstCorners, srcCorners);
-  const h0 = H[0], h1 = H[1], h2 = H[2];
-  const h3 = H[3], h4 = H[4], h5 = H[5];
-  const h6 = H[6], h7 = H[7], h8 = H[8];
+  const h0 = H[0],
+    h1 = H[1],
+    h2 = H[2];
+  const h3 = H[3],
+    h4 = H[4],
+    h5 = H[5];
+  const h6 = H[6],
+    h7 = H[7],
+    h8 = H[8];
 
   const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true })!;
   const srcPixels = srcCtx.getImageData(0, 0, srcCanvas.width, srcCanvas.height).data;
@@ -132,9 +138,18 @@ export function warpPerspective(
       const i11 = (y1 * srcW + x1) * 4;
 
       const outIdx = (dy * outputSize + dx) * 4;
-      out[outIdx] = srcPixels[i00] * w00 + srcPixels[i10] * w10 + srcPixels[i01] * w01 + srcPixels[i11] * w11;
-      out[outIdx + 1] = srcPixels[i00 + 1] * w00 + srcPixels[i10 + 1] * w10 + srcPixels[i01 + 1] * w01 + srcPixels[i11 + 1] * w11;
-      out[outIdx + 2] = srcPixels[i00 + 2] * w00 + srcPixels[i10 + 2] * w10 + srcPixels[i01 + 2] * w01 + srcPixels[i11 + 2] * w11;
+      out[outIdx] =
+        srcPixels[i00] * w00 + srcPixels[i10] * w10 + srcPixels[i01] * w01 + srcPixels[i11] * w11;
+      out[outIdx + 1] =
+        srcPixels[i00 + 1] * w00 +
+        srcPixels[i10 + 1] * w10 +
+        srcPixels[i01 + 1] * w01 +
+        srcPixels[i11 + 1] * w11;
+      out[outIdx + 2] =
+        srcPixels[i00 + 2] * w00 +
+        srcPixels[i10 + 2] * w10 +
+        srcPixels[i01 + 2] * w01 +
+        srcPixels[i11 + 2] * w11;
       out[outIdx + 3] = 255;
     }
   }

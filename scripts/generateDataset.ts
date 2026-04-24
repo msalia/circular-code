@@ -333,7 +333,7 @@ names:
     labelFormat: "yolo-obb: class_id x1 y1 x2 y2 x3 y3 x4 y4",
     classMap: { 0: "circular_code" },
     trainCount: posValStart + negValStart,
-    valCount: (POSITIVE_COUNT - posValStart) + (NEGATIVE_COUNT - negValStart),
+    valCount: POSITIVE_COUNT - posValStart + (NEGATIVE_COUNT - negValStart),
   };
   fs.writeFileSync(path.join(OUT_DIR, "manifest.json"), JSON.stringify(manifest, null, 2));
 

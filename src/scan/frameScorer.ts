@@ -31,7 +31,8 @@ export function scoreFrame(
     for (let x = 1; x < regionW - 1; x += 2) {
       const idx = y * regionW + x;
       const v = gray[idx];
-      const lap = -4 * v + gray[idx - 1] + gray[idx + 1] + gray[idx - regionW] + gray[idx + regionW];
+      const lap =
+        -4 * v + gray[idx - 1] + gray[idx + 1] + gray[idx - regionW] + gray[idx + regionW];
       lapSum += lap * lap;
       lapCount++;
       sum += v;

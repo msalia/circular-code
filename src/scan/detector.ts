@@ -31,7 +31,6 @@ export function detectCircle(frame: HTMLCanvasElement): DetectionResult {
   return houghCircleDetect(edges, width, height);
 }
 
-
 function sobelEdgeDetect(gray: Uint8Array, width: number, height: number): Uint8Array {
   const edges = new Uint8Array(width * height);
   const thresholdSq = 100 * 100;

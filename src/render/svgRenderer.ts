@@ -1,6 +1,12 @@
 import type { EncodedCode } from "@/types";
 
-import { getRingRadius, getRingWidth, getSegmentAngle, getSegmentsForRing, isDataRing } from "@/core/layout";
+import {
+  getRingRadius,
+  getRingWidth,
+  getSegmentAngle,
+  getSegmentsForRing,
+  isDataRing,
+} from "@/core/layout";
 
 const DEFAULT_SIZE = 300;
 const DEFAULT_PRIMARY = "#000000";
