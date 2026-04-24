@@ -1,6 +1,6 @@
 import type { EncodedCode } from "@/types";
 
-import { getRingRadius, getSegmentAngle, getSegmentsForRing, isDataRing } from "@/core/layout";
+import { getRingRadius, getRingWidth, getSegmentAngle, getSegmentsForRing, isDataRing } from "@/core/layout";
 
 const DEFAULT_SIZE = 300;
 const DEFAULT_PRIMARY = "#000000";
@@ -27,7 +27,7 @@ export function renderSVG(code: EncodedCode, opts: SVGRenderOptions | number = {
   const { bits, rings, segmentsPerRing } = code;
   const cx = size / 2;
   const cy = size / 2;
-  const ringWidth = size / (2 * (rings + 2));
+  const ringWidth = getRingWidth(rings, size);
   const strokeWidth = ringWidth * STROKE_WIDTH_RATIO;
   let secondaryPaths = "";
   let primaryPaths = "";

@@ -8,14 +8,19 @@ export { renderCanvas } from "@/render/canvasRenderer";
 export { processFrame, scanFromVideo } from "@/scan";
 export { MultiFrameConsensus } from "@/scan/consensus";
 export { scoreFrame } from "@/scan/frameScorer";
-export { solveHomography, warpPerspective } from "@/scan/perspective";
+export { estimateCircleCorners, solveHomography, warpPerspective } from "@/scan/perspective";
 export {
   detectWithModel,
-  interpretPrediction,
+  getLoadedModel,
   isModelLoaded,
   loadModel,
   loadModelFromFiles,
+  MODEL_INPUT_SIZE,
+  parseDetections,
+  runModelPrediction,
 } from "@/ml/detector";
+export { getOrCreateCanvas } from "@/utils/canvas";
+export { toGrayscale } from "@/utils/image";
 export { useCircularScanner } from "@/react/useCircularScanner";
 export type {
   CircularCodeOptions,

@@ -1,11 +1,11 @@
-import type { DetectionResult, Point, ScanOptions, ScanResult } from "@/types";
+import type { DetectionResult, ScanOptions, ScanResult } from "@/types";
 
 import { decode } from "@/core/decoder";
 import { detectWithModel, isModelLoaded, loadModel } from "@/ml/detector";
 import { MultiFrameConsensus } from "@/scan/consensus";
 import { detectCircle } from "@/scan/detector";
 import { scoreFrame } from "@/scan/frameScorer";
-import { warpPerspective } from "@/scan/perspective";
+import { estimateCircleCorners, warpPerspective } from "@/scan/perspective";
 import { samplePolarGrid } from "@/scan/sampler";
 import { captureFrame } from "@/utils/image";
 
@@ -88,14 +88,9 @@ function sampleAndDecode(
   rings: number,
   segmentsPerRing: number,
   eccBytes: number,
+  angle = 0,
 ): string {
-  const pad = r * 1.15;
-  const srcCorners: Point[] = [
-    { x: cx - pad, y: cy - pad },
-    { x: cx + pad, y: cy - pad },
-    { x: cx + pad, y: cy + pad },
-    { x: cx - pad, y: cy + pad },
-  ];
+  const srcCorners = estimateCircleCorners(cx, cy, r, 1.15, angle);
 
   const rectified = warpPerspective(canvas, srcCorners, CODE_SIZE);
 
@@ -134,7 +129,7 @@ export function processFrame(
       try {
         const data = sampleAndDecode(
           captured, detection.cx, detection.cy, detection.r,
-          rings, segmentsPerRing, eccBytes,
+          rings, segmentsPerRing, eccBytes, detection.angle ?? 0,
         );
         return { data, confidence: detection.confidence, frameScore };
       } catch {

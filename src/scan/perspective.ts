@@ -1,5 +1,7 @@
 import type { Point } from "@/types";
 
+import { getOrCreateCanvas } from "@/utils/canvas";
+
 export function solveHomography(src: Point[], dst: Point[]): number[] {
   if (src.length !== 4 || dst.length !== 4) {
     throw new Error("Homography requires exactly 4 point correspondences");
@@ -77,51 +79,6 @@ export function invertHomography(H: number[]): number[] {
   return inv;
 }
 
-function applyHomography(H: number[], x: number, y: number): Point {
-  const w = H[6] * x + H[7] * y + H[8];
-  return {
-    x: (H[0] * x + H[1] * y + H[2]) / w,
-    y: (H[3] * x + H[4] * y + H[5]) / w,
-  };
-}
-
-function bilinearSample(
-  data: Uint8ClampedArray,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-): [number, number, number, number] {
-  const x0 = Math.floor(x);
-  const y0 = Math.floor(y);
-  const x1 = Math.min(x0 + 1, width - 1);
-  const y1 = Math.min(y0 + 1, height - 1);
-  const fx = x - x0;
-  const fy = y - y0;
-
-  const cx0 = Math.max(0, Math.min(x0, width - 1));
-  const cy0 = Math.max(0, Math.min(y0, height - 1));
-
-  const idx00 = (cy0 * width + cx0) * 4;
-  const idx10 = (cy0 * width + x1) * 4;
-  const idx01 = (y1 * width + cx0) * 4;
-  const idx11 = (y1 * width + x1) * 4;
-
-  const result: [number, number, number, number] = [0, 0, 0, 0];
-  for (let c = 0; c < 4; c++) {
-    result[c] = Math.round(
-      data[idx00 + c] * (1 - fx) * (1 - fy) +
-        data[idx10 + c] * fx * (1 - fy) +
-        data[idx01 + c] * (1 - fx) * fy +
-        data[idx11 + c] * fx * fy,
-    );
-  }
-  return result;
-}
-
-let warpCanvas: HTMLCanvasElement | null = null;
-let warpCtx: CanvasRenderingContext2D | null = null;
-
 export function warpPerspective(
   srcCanvas: HTMLCanvasElement,
   srcCorners: Point[],
@@ -144,18 +101,10 @@ export function warpPerspective(
   const srcW = srcCanvas.width;
   const srcH = srcCanvas.height;
 
-  if (!warpCanvas) {
-    warpCanvas = document.createElement("canvas");
-  }
-  if (warpCanvas.width !== outputSize || warpCanvas.height !== outputSize) {
-    warpCanvas.width = outputSize;
-    warpCanvas.height = outputSize;
-    warpCtx = null;
-  }
-  if (!warpCtx) {
-    warpCtx = warpCanvas.getContext("2d", { willReadFrequently: true })!;
-  }
-  const outData = warpCtx.createImageData(outputSize, outputSize);
+  const { canvas, ctx } = getOrCreateCanvas(outputSize, "warpPerspective", {
+    willReadFrequently: true,
+  });
+  const outData = ctx.createImageData(outputSize, outputSize);
   const out = outData.data;
 
   for (let dy = 0; dy < outputSize; dy++) {
@@ -190,15 +139,28 @@ export function warpPerspective(
     }
   }
 
-  warpCtx.putImageData(outData, 0, 0);
-  return warpCanvas;
+  ctx.putImageData(outData, 0, 0);
+  return canvas;
 }
 
-export function estimateCircleCorners(cx: number, cy: number, r: number): Point[] {
-  return [
-    { x: cx - r, y: cy - r },
-    { x: cx + r, y: cy - r },
-    { x: cx + r, y: cy + r },
-    { x: cx - r, y: cy + r },
+export function estimateCircleCorners(
+  cx: number,
+  cy: number,
+  r: number,
+  padding = 1,
+  angle = 0,
+): Point[] {
+  const pad = r * padding;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const offsets: [number, number][] = [
+    [-pad, -pad],
+    [pad, -pad],
+    [pad, pad],
+    [-pad, pad],
   ];
+  return offsets.map(([dx, dy]) => ({
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  }));
 }

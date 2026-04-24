@@ -1,6 +1,9 @@
+export function getRingWidth(rings: number, size: number): number {
+  return size / (2 * (rings + 2));
+}
+
 export function getRingRadius(ring: number, rings: number, size: number): number {
-  const ringWidth = size / (2 * (rings + 2));
-  return (ring + 1) * ringWidth;
+  return (ring + 1) * getRingWidth(rings, size);
 }
 
 export function getSegmentAngle(segment: number, segmentsInRing: number): number {

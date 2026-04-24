@@ -1,5 +1,7 @@
 import type { DetectionResult } from "@/types";
 
+import { toGrayscale } from "@/utils/image";
+
 const HOUGH_ANGLES = 12;
 const cosTable = new Float64Array(HOUGH_ANGLES);
 const sinTable = new Float64Array(HOUGH_ANGLES);
@@ -29,14 +31,6 @@ export function detectCircle(frame: HTMLCanvasElement): DetectionResult {
   return houghCircleDetect(edges, width, height);
 }
 
-function toGrayscale(data: Uint8ClampedArray, pixelCount: number): Uint8Array {
-  const gray = new Uint8Array(pixelCount);
-  for (let i = 0; i < pixelCount; i++) {
-    const idx = i * 4;
-    gray[i] = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
-  }
-  return gray;
-}
 
 function sobelEdgeDetect(gray: Uint8Array, width: number, height: number): Uint8Array {
   const edges = new Uint8Array(width * height);

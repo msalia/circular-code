@@ -2,15 +2,53 @@ import type { DetectionResult } from "@/types";
 
 import * as tf from "@tensorflow/tfjs";
 
-const MODEL_INPUT_SIZE = 224;
+export const MODEL_INPUT_SIZE = 320;
 
 let model: tf.GraphModel | tf.LayersModel | null = null;
 
-export async function loadModel(modelUrl = "/models/circular_code/model.json"): Promise<void> {
-  try {
-    model = await tf.loadGraphModel(modelUrl);
-  } catch {
-    model = await tf.loadLayersModel(modelUrl);
+export async function loadModel(modelPath = "/models/circular_code/model.json"): Promise<void> {
+  if (typeof window === "undefined" && !modelPath.startsWith("http")) {
+    await loadModelFromDisk(modelPath);
+  } else {
+    model = await loadModelFromSource(modelPath);
+  }
+}
+
+async function loadModelFromDisk(modelJsonPath: string): Promise<void> {
+  const fs = await import("fs");
+  const path = await import("path");
+
+  const raw = fs.readFileSync(modelJsonPath, "utf-8");
+  const modelJSON = JSON.parse(raw);
+  const dir = path.dirname(modelJsonPath);
+
+  const manifest = modelJSON.weightsManifest[0];
+  const shardPaths: string[] = manifest.paths;
+  const buffers = shardPaths.map((p: string) => fs.readFileSync(path.join(dir, p)));
+
+  const totalBytes = buffers.reduce((sum: number, b: Buffer) => sum + b.byteLength, 0);
+  const weightData = new ArrayBuffer(totalBytes);
+  const view = new Uint8Array(weightData);
+  let offset = 0;
+  for (const buf of buffers) {
+    view.set(new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), offset);
+    offset += buf.byteLength;
+  }
+
+  const weightSpecs = manifest.weights as tf.io.WeightsManifestEntry[];
+
+  if (modelJSON.format === "graph-model" || modelJSON.modelTopology?.node) {
+    model = await tf.loadGraphModel(
+      tf.io.fromMemory(modelJSON.modelTopology, weightSpecs, weightData),
+    );
+  } else {
+    model = await tf.loadLayersModel(
+      tf.io.fromMemory({
+        modelTopology: modelJSON.modelTopology,
+        weightSpecs,
+        weightData,
+      }),
+    );
   }
 }
 
@@ -19,14 +57,18 @@ export async function loadModelFromFiles(
   weightSpecs: tf.io.WeightsManifestEntry[],
   weightData: ArrayBuffer,
 ): Promise<void> {
+  model = await loadModelFromSource(
+    tf.io.fromMemory({ modelTopology: modelJSON, weightSpecs, weightData }),
+  );
+}
+
+async function loadModelFromSource(
+  source: string | tf.io.IOHandler,
+): Promise<tf.GraphModel | tf.LayersModel> {
   try {
-    model = await tf.loadGraphModel(
-      tf.io.fromMemory(modelJSON, weightSpecs, weightData),
-    );
+    return await tf.loadGraphModel(source as any);
   } catch {
-    model = await tf.loadLayersModel(
-      tf.io.fromMemory({ modelTopology: modelJSON, weightSpecs, weightData }),
-    );
+    return await tf.loadLayersModel(source as any);
   }
 }
 
@@ -34,30 +76,66 @@ export function isModelLoaded(): boolean {
   return model !== null;
 }
 
-export function interpretPrediction(
-  values: ArrayLike<number>,
+export function getLoadedModel(): tf.GraphModel | tf.LayersModel | null {
+  return model;
+}
+
+export function runModelPrediction(
+  mdl: tf.GraphModel | tf.LayersModel,
+  input: tf.Tensor,
+): tf.Tensor {
+  return mdl instanceof tf.GraphModel
+    ? (mdl.predict(input) as tf.Tensor)
+    : ((mdl as tf.LayersModel).predict(input) as tf.Tensor);
+}
+
+export function parseDetections(
+  outputData: Float32Array | Int32Array | Uint8Array,
+  outputShape: number[],
   frameW: number,
   frameH: number,
+  confThreshold = 0.5,
 ): DetectionResult | null {
-  const classLogit = values[0];
-  const confidence = 1 / (1 + Math.exp(-classLogit));
+  // YOLOv8-OBB output: [1, 6, N] where channels are [cx, cy, w, h, angle, class_score]
+  // Standard YOLOv8 output: [1, 5, N] where channels are [cx, cy, w, h, class_score]
+  const channels = outputShape[1];
+  const numCandidates = outputShape[2];
+  const hasAngle = channels >= 6;
+  const confChannel = hasAngle ? 5 : 4;
 
-  if (confidence < 0.5) return null;
+  let bestConf = confThreshold;
+  let bestIdx = -1;
 
-  const cx = values[1];
-  const cy = values[2];
-  const w = values[3];
-  const h = values[4];
-  const sinA = values[5];
-  const cosA = values[6];
+  for (let i = 0; i < numCandidates; i++) {
+    const conf = outputData[confChannel * numCandidates + i];
+    if (conf > bestConf) {
+      bestConf = conf;
+      bestIdx = i;
+    }
+  }
 
-  return {
-    cx: cx * frameW,
-    cy: cy * frameH,
-    r: Math.min(w * frameW, h * frameH) / 2,
-    confidence,
-    angle: Math.atan2(sinA, cosA),
+  if (bestIdx < 0) return null;
+
+  const cx = outputData[0 * numCandidates + bestIdx];
+  const cy = outputData[1 * numCandidates + bestIdx];
+  const w = outputData[2 * numCandidates + bestIdx];
+  const h = outputData[3 * numCandidates + bestIdx];
+
+  const scaleX = frameW / MODEL_INPUT_SIZE;
+  const scaleY = frameH / MODEL_INPUT_SIZE;
+
+  const result: DetectionResult = {
+    cx: cx * scaleX,
+    cy: cy * scaleY,
+    r: Math.min(w * scaleX, h * scaleY) / 2,
+    confidence: bestConf,
   };
+
+  if (hasAngle) {
+    result.angle = outputData[4 * numCandidates + bestIdx];
+  }
+
+  return result;
 }
 
 export function detectWithModel(canvas: HTMLCanvasElement): DetectionResult | null {
@@ -70,15 +148,18 @@ export function detectWithModel(canvas: HTMLCanvasElement): DetectionResult | nu
       .fromPixels(canvas)
       .resizeBilinear([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE])
       .toFloat()
-      .div(127.5)
-      .sub(1)
+      .div(255.0)
       .expandDims(0);
 
-    const pred = model instanceof tf.GraphModel
-      ? model.predict(input) as tf.Tensor
-      : (model as tf.LayersModel).predict(input) as tf.Tensor;
-    const values = pred.dataSync();
-    result = interpretPrediction(values, canvas.width, canvas.height);
+    const pred = runModelPrediction(model!, input);
+    const data = pred.dataSync();
+    const shape = pred.shape;
+    result = parseDetections(
+      data,
+      shape as number[],
+      canvas.width,
+      canvas.height,
+    );
   });
 
   return result;

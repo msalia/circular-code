@@ -9,6 +9,7 @@ __pycache__
 *.keras
 *.h5
 models/**/*.bin
+runs
 
 .DS_Store
 .claude/settings.local.json

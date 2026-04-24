@@ -1,5 +1,7 @@
 import type { FrameScore } from "@/types";
 
+import { toGrayscale } from "@/utils/image";
+
 export function scoreFrame(
   canvas: HTMLCanvasElement,
   cx: number,
@@ -18,11 +20,7 @@ export function scoreFrame(
 
   const data = ctx.getImageData(left, top, regionW, regionH).data;
 
-  const gray = new Uint8Array(regionW * regionH);
-  for (let i = 0; i < gray.length; i++) {
-    const idx = i * 4;
-    gray[i] = (data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29) >> 8;
-  }
+  const gray = toGrayscale(data, regionW * regionH);
 
   let lapSum = 0;
   let lapCount = 0;

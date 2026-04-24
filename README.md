@@ -11,10 +11,10 @@ Not Apple-compatible — this is an independent format with its own encoding, er
 - **Reed-Solomon ECC** — Real GF(256) error correction that recovers data from damaged codes
 - **Dual-color SVG rendering** — Primary color for data arcs, secondary color for non-data segments with configurable gap separation
 - **Canvas rendering** — Generate codes for screen display
-- **Perspective correction** — Homography-based rectification for codes viewed at an angle
+- **Rotation-aware dewarping** — Uses detected orientation angle to perspective-correct rotated codes before sampling
 - **Frame scoring** — Laplacian sharpness + contrast scoring to pick the best video frames
 - **Multi-frame consensus** — Weighted majority voting across frames for reliable scanning
-- **ML-assisted detection** — MobileNetV2-based CNN trained on synthetic data to locate codes in images
+- **ML-assisted detection** — YOLOv8-OBB model trained on synthetic data to locate codes with orientation
 - **React hook** — `useCircularScanner()` for drop-in camera scanning in React apps
 
 ## Project Structure
@@ -25,9 +25,9 @@ src/
   ecc/            GF(256) arithmetic and Reed-Solomon codec
   render/         SVG and Canvas renderers
   scan/           Detection, sampling, perspective correction, frame scoring, consensus
-  ml/             TensorFlow.js model loader and inference
+  ml/             TensorFlow.js model loader and YOLO inference
   react/          useCircularScanner hook
-  utils/          Image capture, math helpers
+  utils/          Canvas caching, image capture, grayscale conversion, math helpers
   types.ts        Shared type definitions
   index.ts        Public API exports
 
@@ -36,14 +36,14 @@ scripts/
   resolve-aliases.js   Post-build path alias resolver
 
 training/
-  train.py             GPU-accelerated model training (Python/TensorFlow + Metal)
-  export_tfjs.py       Keras to TF.js model conversion with compatibility patches
+  train.py             YOLO model training and TF.js export (ultralytics)
   requirements.txt     Python dependencies
   setup_venv.sh        Virtual environment setup script
 
 tests/                 Vitest unit and integration tests
-models/circular_code/  Trained TF.js model output (gitignored, generate via training pipeline)
-dataset/               Generated training images and labels (gitignored)
+models/circular_code/  Trained TF.js model output
+dataset/               Generated training images and labels (YOLO OBB format)
+example/               Browser demo app (esbuild + local server)
 ```
 
 ## Quick Start
@@ -68,7 +68,7 @@ Compiles TypeScript to `dist/` and resolves `@/` path aliases for Node.js.
 npm test
 ```
 
-Runs all 30 tests (bitstream, encoder/decoder roundtrips, Reed-Solomon error correction, perspective math, multi-frame consensus, end-to-end).
+Runs 67 tests covering bitstream, encoder/decoder roundtrips, Reed-Solomon error correction, perspective math, multi-frame consensus, SVG rendering, YOLO detection parsing, and end-to-end flows.
 
 ### Type Check
 
@@ -146,22 +146,17 @@ function Scanner() {
 
 ## Training the ML Detector
 
-The detector uses a MobileNetV2 backbone (pretrained on ImageNet) with a custom detection head that locates circular codes in images and outputs bounding box + rotation angle. Training uses synthetic data generated from the real SVG renderer.
+The detector uses a YOLOv8-nano OBB (Oriented Bounding Box) model that locates circular codes in images and outputs bounding box + rotation angle. Training uses synthetic data generated from the real SVG renderer via the [ultralytics](https://docs.ultralytics.com/) toolkit.
 
 ### Prerequisites
 
-Python 3.9+ with TensorFlow and Metal GPU support (macOS):
-
-```bash
-pip3 install tensorflow tensorflow-metal tensorflowjs Pillow numpy
-```
-
-Or use the provided setup script:
+Python 3.9+ with ultralytics and TensorFlow.js export support:
 
 ```bash
 cd training
 bash setup_venv.sh
 source venv/bin/activate
+pip install ultralytics tensorflowjs
 ```
 
 ### Step 1: Generate Training Data
@@ -171,66 +166,54 @@ npm run build
 npm run generate-dataset
 ```
 
-Produces 5,000 images (4,000 positive + 1,000 negative) in `dataset/` at 320x320. Positive samples use the SVG renderer with randomly generated text (URLs, phrases, alphanumeric tokens, numbers), varied ring/segment configs, rotation, skew, scale, noise, lighting variation, and background clutter. Labels are in YOLO-style format: `class cx cy w h sin(angle) cos(angle)`.
+Produces 10,000 images (8,000 positive + 2,000 negative) with an 85/15 train/val split in YOLO OBB format. Positive samples use the SVG renderer with randomly generated text (URLs, phrases, alphanumeric tokens, numbers), varied ring/segment configs, dual-color rendering, rotation, skew, scale, noise, lighting variation, and background clutter.
+
+Output structure:
+```
+dataset/
+  images/train/    Training images (320x320 PNG)
+  images/val/      Validation images
+  labels/train/    OBB labels: class_id x1 y1 x2 y2 x3 y3 x4 y4
+  labels/val/      Validation labels (empty file = no object)
+  data.yaml        YOLO dataset config
+  manifest.json    Dataset metadata
+```
 
 ### Step 2: Train the Model
 
 ```bash
-python3 training/train.py
+python training/train.py
 ```
 
-Trains in two phases on Metal GPU:
-1. **Phase 1** — Head training with frozen MobileNetV2 backbone (20 epochs)
-2. **Phase 2** — Fine-tuning top backbone layers at 1/10 learning rate (20 epochs)
-
-The trained model is exported to TF.js format at `models/circular_code/model.json`.
+Trains a YOLOv8n-OBB model and auto-exports to TF.js format at `models/circular_code/`.
 
 Options:
 
 ```bash
-python3 training/train.py --epochs 40 --batch-size 32 --lr 0.001
-python3 training/train.py --dataset ./my_dataset --output ./my_model
+python training/train.py --epochs 40 --batch-size 32
+python training/train.py --dataset ./my_dataset --output ./my_model
+python training/train.py --resume runs/obb/runs/train/circular_code/weights/best.pt
+python training/train.py --base-model yolov8s-obb.pt  # use a larger model
 ```
-
-Training includes early stopping (patience=10) and learning rate reduction on plateau.
 
 ### Step 3: Re-export (Optional)
 
-If you modify the model after training or want to re-run the Keras-to-TF.js conversion:
+If you want to re-export a previously trained model to TF.js without retraining:
 
-```bash
-python3 training/export_tfjs.py \
-  --keras-model ./models/circular_code/keras_model.keras \
-  --output ./models/circular_code
+```python
+from ultralytics import YOLO
+YOLO("runs/obb/runs/train/circular_code/weights/best.pt").export(format="tfjs", imgsz=320)
 ```
 
 ### Step 4: Verify
 
-Confirm the model loads in TF.js:
+Run the model accuracy test against the dataset:
 
 ```bash
-node -e "
-const tf = require('@tensorflow/tfjs');
-const fs = require('fs');
-const path = require('path');
-
-async function test() {
-  const dir = path.resolve('./models/circular_code');
-  const j = JSON.parse(fs.readFileSync(path.join(dir, 'model.json'), 'utf-8'));
-  const buf = fs.readFileSync(path.join(dir, j.weightsManifest[0].paths[0]));
-  const wd = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
-  const model = await tf.loadLayersModel(tf.io.fromMemory({
-    modelTopology: j.modelTopology,
-    weightSpecs: j.weightsManifest[0].weights,
-    weightData: wd,
-  }));
-  console.log('Model loaded. Input:', model.inputs[0].shape, 'Output:', model.outputs[0].shape);
-}
-test();
-"
+npx vitest run tests/model.test.ts
 ```
 
-Expected output: `Model loaded. Input: [ null, 224, 224, 3 ] Output: [ null, 7 ]`
+This loads the TF.js model, runs inference on sampled positive/negative images, and checks classification accuracy (>=80%) and bounding box quality.
 
 ## End-to-End Cheat Sheet
 
@@ -240,15 +223,21 @@ npm install
 npm run build
 npm test
 
-# Generate synthetic training data
-npm run generate-dataset
+# Set up training environment
+cd training && bash setup_venv.sh && source venv/bin/activate
+pip install ultralytics tensorflowjs
+cd ..
 
-# Set up training environment and generate model
-bash training/setup_venv.sh
-source training/venv/bin/activate
+# Generate dataset and train
+npm run build
 npm run generate-dataset
-python3 training/train.py --epochs 40
-python3 training/export_tfjs.py
+python training/train.py --epochs 40
+
+# Verify model quality
+npx vitest run tests/model.test.ts
+
+# Run the example app
+npm run example
 ```
 
 ## Architecture
@@ -266,10 +255,10 @@ Text -> UTF-8 bytes -> [version, length, ...data] header
 ### Scanning Pipeline
 
 ```
-Video frame -> Capture -> Normalize to 224x224
-            -> Detect (ML model if loaded, else Hough circles)
+Video frame -> Capture 320x320
+            -> Detect (YOLO OBB model if loaded, else Hough circles)
             -> Score frame (sharpness + contrast)
-            -> Perspective correction (4-point homography warp)
+            -> Rotation-aware perspective correction (4-point homography using detected angle)
             -> Polar grid sampling
             -> RS decode -> Multi-frame consensus -> Result
 ```
@@ -277,13 +266,12 @@ Video frame -> Capture -> Normalize to 224x224
 ### Model Architecture
 
 ```
-Input: 224x224x3
-MobileNetV2 backbone (ImageNet pretrained, top 30 layers fine-tuned)
-GlobalAveragePooling2D                               [1280]
-Dropout(0.3) -> Dense(128, ReLU) -> Dropout(0.2) -> Dense(7, linear)
+YOLOv8n-OBB (Oriented Bounding Box)
+Input: 320x320x3, normalized to [0, 1]
+Output: [1, 6, N] — N detection candidates
+  Per candidate: [cx, cy, w, h, angle, class_score]
 
-Output: [class_logit, cx, cy, w, h, sin(angle), cos(angle)]
-Loss: sigmoid_cross_entropy(class) + 2*MSE(bbox) + 1*MSE(angle)
+Exported to TF.js GraphModel format (~9 MB)
 ```
 
 ## API Reference
@@ -310,8 +298,9 @@ Loss: sigmoid_cross_entropy(class) + 2*MSE(bbox) + 1*MSE(angle)
 |----------|-----------|-------------|
 | `scanFromVideo` | `(video: HTMLVideoElement, opts?: ScanOptions) => Promise<string>` | Scan video until decoded |
 | `processFrame` | `(video: HTMLVideoElement, opts?) => ScanResult \| null` | Process a single frame |
-| `loadModel` | `(url?: string) => Promise<void>` | Load TF.js detection model (browser) |
+| `loadModel` | `(path?: string) => Promise<void>` | Load TF.js detection model |
 | `loadModelFromFiles` | `(json, specs, data) => Promise<void>` | Load model from buffers (Node.js) |
+| `parseDetections` | `(data, shape, frameW, frameH, threshold?) => DetectionResult \| null` | Parse YOLO output tensor into a detection |
 
 ### React
 
@@ -327,3 +316,6 @@ Loss: sigmoid_cross_entropy(class) + 2*MSE(bbox) + 1*MSE(angle)
 | `scoreFrame` | Frame quality scoring (sharpness + contrast) |
 | `solveHomography` | 4-point perspective transform solver |
 | `warpPerspective` | Apply perspective correction to canvas |
+| `estimateCircleCorners` | Compute rotated bounding corners from detection (cx, cy, r, padding, angle) |
+| `getOrCreateCanvas` | Cached canvas factory to avoid DOM thrashing |
+| `toGrayscale` | Fast integer-arithmetic luminance conversion |

@@ -12,6 +12,7 @@ const OUT_DIR = "./dataset";
 const SIZE = 320;
 const POSITIVE_COUNT = 8000;
 const NEGATIVE_COUNT = 2000;
+const VAL_RATIO = 0.15;
 
 const ALPHA = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const ALNUM = ALPHA + "0123456789";
@@ -87,11 +88,12 @@ async function drawCircularCode(
   cy: number,
   codeSize: number,
   fgColor: string,
+  secColor: string,
 ): Promise<void> {
   const svg = renderSVG(code, {
     size: Math.round(codeSize),
     primary: fgColor,
-    secondary: "none",
+    secondary: secColor,
   });
   const img = await loadImage(Buffer.from(svg));
   ctx.drawImage(img, cx - codeSize / 2, cy - codeSize / 2);
@@ -149,7 +151,36 @@ function applyBrightnessVariation(ctx: CanvasRenderingContext2D, w: number, h: n
   ctx.fillRect(0, 0, w, h);
 }
 
-async function generatePositive(index: number): Promise<void> {
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
+}
+
+function rotatedCorners(
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+  angle: number,
+): [number, number, number, number, number, number, number, number] {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const hw = w / 2;
+  const hh = h / 2;
+  const corners = [
+    [-hw, -hh],
+    [hw, -hh],
+    [hw, hh],
+    [-hw, hh],
+  ];
+  const result: number[] = [];
+  for (const [dx, dy] of corners) {
+    result.push(clamp01(cx + dx * cos - dy * sin));
+    result.push(clamp01(cy + dx * sin + dy * cos));
+  }
+  return result as [number, number, number, number, number, number, number, number];
+}
+
+async function generatePositive(index: number, split: "train" | "val"): Promise<void> {
   const canvas = createCanvas(SIZE, SIZE);
   const ctx = canvas.getContext("2d");
 
@@ -183,7 +214,9 @@ async function generatePositive(index: number): Promise<void> {
 
   const fgBright = randomInt(0, 60);
   const fgColor = `rgb(${fgBright},${fgBright},${fgBright})`;
-  await drawCircularCode(ctx, code, 0, 0, codeSize, fgColor);
+  const secBright = randomInt(Math.min(fgBright + 40, 200), 230);
+  const secColor = `rgb(${secBright},${secBright},${secBright})`;
+  await drawCircularCode(ctx, code, 0, 0, codeSize, fgColor, secColor);
   ctx.restore();
 
   applyBrightnessVariation(ctx, SIZE, SIZE);
@@ -197,22 +230,20 @@ async function generatePositive(index: number): Promise<void> {
     ctx.drawImage(tmpCanvas, 0, 0);
   }
 
-  const imgPath = path.join(OUT_DIR, "images", `${index}.png`);
+  const imgPath = path.join(OUT_DIR, "images", split, `${index}.png`);
   fs.writeFileSync(imgPath, canvas.toBuffer());
 
-  const x = cx / SIZE;
-  const y = cy / SIZE;
-  const w = (codeSize * scaleX) / SIZE;
-  const h = (codeSize * scaleY) / SIZE;
-  const sinA = Math.sin(rotation);
-  const cosA = Math.cos(rotation);
+  const w = codeSize * scaleX;
+  const h = codeSize * scaleY;
 
-  const label = `1 ${x.toFixed(6)} ${y.toFixed(6)} ${w.toFixed(6)} ${h.toFixed(6)} ${sinA.toFixed(6)} ${cosA.toFixed(6)}`;
-  const labelPath = path.join(OUT_DIR, "labels", `${index}.txt`);
+  // YOLO OBB format: class_id x1 y1 x2 y2 x3 y3 x4 y4 (pixel coords, normalized 0-1)
+  const corners = rotatedCorners(cx / SIZE, cy / SIZE, w / SIZE, h / SIZE, rotation);
+  const label = `0 ${corners.map((v) => v.toFixed(6)).join(" ")}`;
+  const labelPath = path.join(OUT_DIR, "labels", split, `${index}.txt`);
   fs.writeFileSync(labelPath, label);
 }
 
-function generateNegative(index: number): void {
+function generateNegative(index: number, split: "train" | "val"): void {
   const canvas = createCanvas(SIZE, SIZE);
   const ctx = canvas.getContext("2d");
 
@@ -248,21 +279,27 @@ function generateNegative(index: number): void {
 
   addNoisePixels(ctx, SIZE, SIZE);
 
-  const imgPath = path.join(OUT_DIR, "images", `${index}.png`);
+  const imgPath = path.join(OUT_DIR, "images", split, `${index}.png`);
   fs.writeFileSync(imgPath, canvas.toBuffer());
 
-  const label = `0 0 0 0 0 0 0`;
-  const labelPath = path.join(OUT_DIR, "labels", `${index}.txt`);
-  fs.writeFileSync(labelPath, label);
+  // YOLO: empty label file = no objects
+  const labelPath = path.join(OUT_DIR, "labels", split, `${index}.txt`);
+  fs.writeFileSync(labelPath, "");
 }
 
 async function main(): Promise<void> {
-  fs.mkdirSync(path.join(OUT_DIR, "images"), { recursive: true });
-  fs.mkdirSync(path.join(OUT_DIR, "labels"), { recursive: true });
+  for (const split of ["train", "val"] as const) {
+    fs.mkdirSync(path.join(OUT_DIR, "images", split), { recursive: true });
+    fs.mkdirSync(path.join(OUT_DIR, "labels", split), { recursive: true });
+  }
+
+  const posValStart = Math.floor(POSITIVE_COUNT * (1 - VAL_RATIO));
+  const negValStart = Math.floor(NEGATIVE_COUNT * (1 - VAL_RATIO));
 
   console.log(`Generating ${POSITIVE_COUNT} positive samples...`);
   for (let i = 0; i < POSITIVE_COUNT; i++) {
-    await generatePositive(i);
+    const split = i < posValStart ? "train" : "val";
+    await generatePositive(i, split);
     if ((i + 1) % 200 === 0) {
       console.log(`  ${i + 1}/${POSITIVE_COUNT}`);
     }
@@ -270,23 +307,38 @@ async function main(): Promise<void> {
 
   console.log(`Generating ${NEGATIVE_COUNT} negative samples...`);
   for (let i = 0; i < NEGATIVE_COUNT; i++) {
-    generateNegative(POSITIVE_COUNT + i);
+    const split = i < negValStart ? "train" : "val";
+    generateNegative(POSITIVE_COUNT + i, split);
     if ((i + 1) % 100 === 0) {
       console.log(`  ${i + 1}/${NEGATIVE_COUNT}`);
     }
   }
+
+  // YOLO OBB data.yaml
+  const dataYaml = `path: ${path.resolve(OUT_DIR)}
+train: images/train
+val: images/val
+
+nc: 1
+names:
+  0: circular_code
+`;
+  fs.writeFileSync(path.join(OUT_DIR, "data.yaml"), dataYaml);
 
   const manifest = {
     total: POSITIVE_COUNT + NEGATIVE_COUNT,
     positive: POSITIVE_COUNT,
     negative: NEGATIVE_COUNT,
     imageSize: SIZE,
-    labelFormat: "class cx cy w h sin(angle) cos(angle)",
-    classMap: { 0: "no_code", 1: "circular_code" },
+    labelFormat: "yolo-obb: class_id x1 y1 x2 y2 x3 y3 x4 y4",
+    classMap: { 0: "circular_code" },
+    trainCount: posValStart + negValStart,
+    valCount: (POSITIVE_COUNT - posValStart) + (NEGATIVE_COUNT - negValStart),
   };
   fs.writeFileSync(path.join(OUT_DIR, "manifest.json"), JSON.stringify(manifest, null, 2));
 
   console.log(`Done. ${POSITIVE_COUNT + NEGATIVE_COUNT} samples written to ${OUT_DIR}/`);
+  console.log(`  Train: ${manifest.trainCount}, Val: ${manifest.valCount}`);
 }
 
 main();

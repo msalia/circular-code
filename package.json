@@ -8,7 +8,7 @@
     "build": "tsc && node scripts/resolve-aliases.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "generate-dataset": "rm -rf dataset/images dataset/labels && node dist/scripts/generateDataset.js",
+    "generate-dataset": "rm -rf dataset/images dataset/labels dataset/data.yaml && node dist/scripts/generateDataset.js",
     "train": "node dist/scripts/trainModel.js",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write 'src/**/*.ts' 'scripts/**/*.ts'",
