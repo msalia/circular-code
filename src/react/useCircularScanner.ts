@@ -14,6 +14,7 @@ export function useCircularScanner(options: ScanOptions = {}) {
 
   useEffect(() => {
     let running = true;
+    let rafId = 0;
     const consensus = new MultiFrameConsensus(
       options.consensusSize ?? 7,
       options.consensusRequired ?? 3,
@@ -37,7 +38,7 @@ export function useCircularScanner(options: ScanOptions = {}) {
       videoRef.current.srcObject = stream;
       await videoRef.current.play();
       setScanning(true);
-      loop();
+      rafId = requestAnimationFrame(loop);
     }
 
     function loop() {
@@ -66,13 +67,14 @@ export function useCircularScanner(options: ScanOptions = {}) {
         // skip bad frame
       }
 
-      requestAnimationFrame(loop);
+      rafId = requestAnimationFrame(loop);
     }
 
     start();
 
     return () => {
       running = false;
+      cancelAnimationFrame(rafId);
       setScanning(false);
       if (videoRef.current?.srcObject) {
         const stream = videoRef.current.srcObject as MediaStream;
