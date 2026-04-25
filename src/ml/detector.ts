@@ -87,11 +87,23 @@ export function parseDetections(
   const confChannel = hasAngle ? 5 : 4;
   const numKeypoints = hasPose ? extraChannels / 3 : 0;
 
+  // TF.js exports apply sigmoid internally, so outputs are already in [0,1].
+  // Detect this by checking if all confidence values fall within [0,1].
+  let needsSigmoid = false;
+  for (let i = 0; i < Math.min(numCandidates, 100); i++) {
+    const v = outputData[confChannel * numCandidates + i];
+    if (v < 0 || v > 1) {
+      needsSigmoid = true;
+      break;
+    }
+  }
+
   let bestConf = threshold;
   let bestIdx = -1;
 
   for (let i = 0; i < numCandidates; i++) {
-    const conf = sigmoid(outputData[confChannel * numCandidates + i]);
+    const raw = outputData[confChannel * numCandidates + i];
+    const conf = needsSigmoid ? sigmoid(raw) : raw;
     if (conf > bestConf) {
       bestConf = conf;
       bestIdx = i;

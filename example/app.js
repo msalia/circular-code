@@ -75463,10 +75463,19 @@ return a / b;`;
     const hasAngle = !hasPose && channels === 6;
     const confChannel = hasAngle ? 5 : 4;
     const numKeypoints = hasPose ? extraChannels / 3 : 0;
+    let needsSigmoid = false;
+    for (let i = 0; i < Math.min(numCandidates, 100); i++) {
+      const v = outputData[confChannel * numCandidates + i];
+      if (v < 0 || v > 1) {
+        needsSigmoid = true;
+        break;
+      }
+    }
     let bestConf = threshold3;
     let bestIdx = -1;
     for (let i = 0; i < numCandidates; i++) {
-      const conf = sigmoid4(outputData[confChannel * numCandidates + i]);
+      const raw = outputData[confChannel * numCandidates + i];
+      const conf = needsSigmoid ? sigmoid4(raw) : raw;
       if (conf > bestConf) {
         bestConf = conf;
         bestIdx = i;
@@ -76046,16 +76055,24 @@ return a / b;`;
     return detectCircle(buf);
   }
   function resolveCorners(detection, padding = 1.15) {
+    let corners;
     if (detection.corners && detection.corners.length === 4) {
-      return detection.corners;
+      corners = detection.corners;
+    } else {
+      corners = estimateCircleCorners(
+        detection.cx,
+        detection.cy,
+        detection.r,
+        padding,
+        detection.angle ?? 0
+      );
     }
-    return estimateCircleCorners(
-      detection.cx,
-      detection.cy,
-      detection.r,
-      padding,
-      detection.angle ?? 0
-    );
+    const [c0, c1, , c3] = corners;
+    const cross = (c1.x - c0.x) * (c3.y - c0.y) - (c1.y - c0.y) * (c3.x - c0.x);
+    if (cross < 0) {
+      corners = [corners[0], corners[3], corners[2], corners[1]];
+    }
+    return corners;
   }
   function scanFrame(source, options = {}) {
     const {
@@ -76077,10 +76094,11 @@ return a / b;`;
     const detected = detection.confidence >= 0.5;
     const activeDetection = detected ? detection : { cx: captured.width / 2, cy: captured.height / 2, r: captured.width * 0.35, confidence: 0 };
     const corners = resolveCorners(activeDetection);
-    let rectified = warpPerspective(captured, corners, codeSize);
-    const orientation = analyzeOrientation(rectified, rings, codeSize);
+    const warped = warpPerspective(captured, corners, codeSize);
+    const orientation = analyzeOrientation(warped, rings, codeSize);
+    let rectified = warped;
     if (orientation.reflected) {
-      rectified = flipBufferHorizontal(rectified);
+      rectified = flipBufferHorizontal(warped);
     }
     const validation = validateCircularCode(rectified, rings, codeSize);
     const frameScoreResult = scoreFrame(
@@ -76115,6 +76133,7 @@ return a / b;`;
       detection,
       orientation,
       corners,
+      warped,
       rectified,
       bits,
       validation,
@@ -76345,7 +76364,7 @@ return a / b;`;
         ctx.stroke();
       }
     });
-    drawPipelineStep("dbg-warp", result.rectified);
+    drawPipelineStep("dbg-warp", result.warped);
     const codeSize = result.rectified.width;
     drawPipelineStep("dbg-sample", result.rectified, (ctx, sz) => {
       const s = sz / codeSize;
@@ -76433,8 +76452,6 @@ return a / b;`;
   scanBtn.addEventListener("click", startScan);
   stopScanBtn.addEventListener("click", stopScan);
   resumeBtn.addEventListener("click", resumeScan);
-  document.getElementById("toggle-ml").addEventListener("change", () => {
-  });
 })();
 /*! Bundled license information:
 
@@ -77972,4 +77989,3 @@ return a / b;`;
    * =============================================================================
    *)
 */
-//# sourceMappingURL=app.js.map

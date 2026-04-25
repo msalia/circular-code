@@ -270,7 +270,7 @@ function scanLoop() {
     }
   });
 
-  drawPipelineStep("dbg-warp", result.rectified);
+  drawPipelineStep("dbg-warp", result.warped);
 
   const codeSize = result.rectified.width;
   drawPipelineStep("dbg-sample", result.rectified, (ctx, sz) => {

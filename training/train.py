@@ -86,11 +86,14 @@ def main():
         exist_ok=True,
     )
 
-    best_pt = os.path.join("runs", "pose", "circular_code", "weights", "best.pt")
-    if not os.path.exists(best_pt):
-        best_pt = os.path.join("runs", "train", "circular_code", "weights", "best.pt")
-    if not os.path.exists(best_pt):
-        print(f"Error: {best_pt} not found after training.")
+    candidates = [
+        os.path.join("runs", "pose", "runs", "train", "circular_code", "weights", "best.pt"),
+        os.path.join("runs", "pose", "circular_code", "weights", "best.pt"),
+        os.path.join("runs", "train", "circular_code", "weights", "best.pt"),
+    ]
+    best_pt = next((p for p in candidates if os.path.exists(p)), None)
+    if not best_pt:
+        print("Error: best.pt not found after training.")
         return
 
     print(f"\nBest model: {best_pt}")

@@ -40,6 +40,7 @@ export type ScanFrameResult = {
   detection: DetectionResult;
   orientation: OrientationAnalysis;
   corners: Point[];
+  warped: ImageBuffer;
   rectified: ImageBuffer;
   bits: number[];
   validation: ValidationResult;
@@ -55,18 +56,32 @@ export function detectCode(buf: ImageBuffer): DetectionResult {
   return detectCircle(buf);
 }
 
-/** Returns model-predicted corners or estimates them from detection geometry. */
+/** Returns model-predicted corners or estimates them from detection geometry.
+ *  Ensures clockwise winding (TL→TR→BR→BL in screen coords) to prevent reflected warps. */
 export function resolveCorners(detection: DetectionResult, padding = 1.15): Point[] {
+  let corners: Point[];
   if (detection.corners && detection.corners.length === 4) {
-    return detection.corners;
+    corners = detection.corners;
+  } else {
+    corners = estimateCircleCorners(
+      detection.cx,
+      detection.cy,
+      detection.r,
+      padding,
+      detection.angle ?? 0,
+    );
   }
-  return estimateCircleCorners(
-    detection.cx,
-    detection.cy,
-    detection.r,
-    padding,
-    detection.angle ?? 0,
-  );
+
+  // Check winding order via cross product of edge vectors from corner 0.
+  // For clockwise winding in screen coords (y-down), cross product should be positive.
+  const [c0, c1, , c3] = corners;
+  const cross =
+    (c1.x - c0.x) * (c3.y - c0.y) - (c1.y - c0.y) * (c3.x - c0.x);
+  if (cross < 0) {
+    corners = [corners[0], corners[3], corners[2], corners[1]];
+  }
+
+  return corners;
 }
 
 /** Flips an ImageBuffer horizontally. */
@@ -133,12 +148,13 @@ export function scanFrame(
     : { cx: captured.width / 2, cy: captured.height / 2, r: captured.width * 0.35, confidence: 0 };
 
   const corners = resolveCorners(activeDetection);
-  let rectified = warpPerspective(captured, corners, codeSize);
+  const warped = warpPerspective(captured, corners, codeSize);
 
-  const orientation = analyzeOrientation(rectified, rings, codeSize);
+  const orientation = analyzeOrientation(warped, rings, codeSize);
 
+  let rectified = warped;
   if (orientation.reflected) {
-    rectified = flipBufferHorizontal(rectified);
+    rectified = flipBufferHorizontal(warped);
   }
 
   const validation = validateCircularCode(rectified, rings, codeSize);
@@ -178,6 +194,7 @@ export function scanFrame(
     detection,
     orientation,
     corners,
+    warped,
     rectified,
     bits,
     validation,

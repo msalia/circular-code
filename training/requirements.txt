@@ -3,3 +3,10 @@ tensorflowjs
 numpy
 Pillow
 setuptools<81
+onnx>=1.12.0,<2.0.0
+onnxslim>=0.1.71
+onnxruntime
+onnx2tf>=1.26.3,<1.29.0
+onnx_graphsurgeon>=0.3.26
+sng4onnx>=1.0.1
+ai-edge-litert>=1.2.0
