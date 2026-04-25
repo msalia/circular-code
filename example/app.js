@@ -75593,21 +75593,6 @@ return a / b;`;
     }
     return gray;
   }
-  function flipBufferHorizontal(buf) {
-    const { width, height, data } = buf;
-    const out = new Uint8ClampedArray(data.length);
-    for (let y = 0; y < height; y++) {
-      for (let x2 = 0; x2 < width; x2++) {
-        const srcIdx = (y * width + x2) * 4;
-        const dstIdx = (y * width + (width - 1 - x2)) * 4;
-        out[dstIdx] = data[srcIdx];
-        out[dstIdx + 1] = data[srcIdx + 1];
-        out[dstIdx + 2] = data[srcIdx + 2];
-        out[dstIdx + 3] = data[srcIdx + 3];
-      }
-    }
-    return { data: out, width, height };
-  }
 
   // src/scan/detector.ts
   var HOUGH_ANGLES = 12;
@@ -76096,10 +76081,7 @@ return a / b;`;
     const corners = resolveCorners(activeDetection);
     const warped = warpPerspective(captured, corners, codeSize);
     const orientation = analyzeOrientation(warped, rings, codeSize);
-    let rectified = warped;
-    if (orientation.reflected) {
-      rectified = flipBufferHorizontal(warped);
-    }
+    const rectified = warped;
     const validation = validateCircularCode(rectified, rings, codeSize);
     const frameScoreResult = scoreFrame(
       captured,

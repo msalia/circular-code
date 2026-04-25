@@ -105,13 +105,9 @@ export function rectifyCode(
   outputSize = CODE_SIZE,
 ): RectifyResult {
   const corners = resolveCorners(detection);
-  let rectified = warpPerspective(frame, corners, outputSize);
+  const rectified = warpPerspective(frame, corners, outputSize);
 
   const orientation = analyzeOrientation(rectified, rings, outputSize);
-
-  if (orientation.reflected) {
-    rectified = flipBufferHorizontal(rectified);
-  }
 
   const validation = validateCircularCode(rectified, rings, outputSize);
 
@@ -152,10 +148,7 @@ export function scanFrame(
 
   const orientation = analyzeOrientation(warped, rings, codeSize);
 
-  let rectified = warped;
-  if (orientation.reflected) {
-    rectified = flipBufferHorizontal(warped);
-  }
+  const rectified = warped;
 
   const validation = validateCircularCode(rectified, rings, codeSize);
   const frameScoreResult = scoreFrame(
