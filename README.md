@@ -9,25 +9,27 @@ Not Apple-compatible — this is an independent format with its own encoding, er
 - **Encoding/Decoding** — Text to circular bit pattern and back, with configurable rings and segments
 - **Adaptive ring layout** — Inner rings hold fewer segments proportional to circumference, preventing visual overlap
 - **Reed-Solomon ECC** — Real GF(256) error correction that recovers data from damaged codes
+- **Orientation ring** — Outer ring with an asymmetric arc pattern (180/90/45) for unambiguous rotation and 3D tilt detection
 - **Dual-color SVG rendering** — Primary color for data arcs, secondary color for non-data segments with configurable gap separation
-- **Canvas rendering** — Generate codes for screen display
-- **Rotation-aware dewarping** — Uses detected orientation angle to perspective-correct rotated codes before sampling
+- **Canvas rendering** — Delegates to SVG renderer for consistent output across both render paths
+- **Multi-head ML detection** — Custom MobileNetV2-based model predicts presence, geometry, corner keypoints, orientation, and reflection in a single forward pass
+- **Reflection detection** — Model identifies mirror-reflected codes and the scanner auto-flips before decoding
+- **Perspective correction** — Model-predicted corner keypoints feed directly into homography for accurate dewarping
 - **Frame scoring** — Laplacian sharpness + contrast scoring to pick the best video frames
 - **Multi-frame consensus** — Weighted majority voting across frames for reliable scanning
-- **ML-assisted detection** — YOLOv8-OBB model trained on synthetic data to locate codes with orientation
 - **React hook** — `useCircularScanner()` for drop-in camera scanning in React apps
 
 ## Project Structure
 
 ```
 src/
-  core/           Encoder, decoder, bitstream, layout math
+  core/           Encoder, decoder, bitstream, layout math (including orientation ring geometry)
   ecc/            GF(256) arithmetic and Reed-Solomon codec
-  render/         SVG and Canvas renderers
+  render/         SVG renderer (primary) and Canvas renderer (delegates to SVG)
   scan/           Detection, sampling, perspective correction, frame scoring, consensus
-  ml/             TensorFlow.js model loader and YOLO inference
+  ml/             TensorFlow.js model loader, multi-head and legacy YOLO inference
   react/          useCircularScanner hook
-  utils/          Canvas caching, image capture, grayscale conversion, math helpers
+  utils/          Canvas caching, image capture, grayscale conversion
   types.ts        Shared type definitions
   index.ts        Public API exports
 
@@ -36,14 +38,13 @@ scripts/
   resolve-aliases.js   Post-build path alias resolver
 
 training/
-  train.py             YOLO model training and TF.js export (ultralytics)
+  train.py             Multi-head model training and TF.js export (TensorFlow/Keras)
   requirements.txt     Python dependencies
   setup_venv.sh        Virtual environment setup script
 
-tests/                 Vitest unit and integration tests
-models/yolov8n-obb.pt  Base YOLO model (downloaded once, reused across runs)
+tests/                 Vitest unit and integration tests (90+ tests)
 models/circular_code/  Trained TF.js model output
-dataset/               Generated training images and labels (YOLO OBB format)
+dataset/               Generated training images and labels
 example/               Browser demo app (esbuild + local server)
 ```
 
@@ -69,7 +70,7 @@ Compiles TypeScript to `dist/` and resolves `@/` path aliases for Node.js.
 npm test
 ```
 
-Runs 67+ tests covering bitstream, encoder/decoder roundtrips, Reed-Solomon error correction, perspective math, multi-frame consensus, SVG rendering, YOLO detection parsing, and end-to-end flows. An additional model inference test suite validates detection accuracy against the dataset.
+Runs 90+ tests covering bitstream, encoder/decoder roundtrips, Reed-Solomon error correction, layout geometry (including orientation ring), perspective math, multi-frame consensus, SVG rendering, multi-head detection parsing, reflection detection, and end-to-end flows. An additional model inference test suite validates detection accuracy against the dataset.
 
 ### Type Check
 
@@ -102,6 +103,8 @@ const styledSvg = renderSVG(code, {
 
 document.getElementById("container").innerHTML = styledSvg;
 ```
+
+The rendered code includes an outer orientation ring with three asymmetric arcs (180, 90, 45) that allow the scanner to determine the code's rotation and detect mirror reflections.
 
 ### Decode
 
@@ -147,11 +150,21 @@ function Scanner() {
 
 ## Training the ML Detector
 
-The detector uses a YOLOv8-nano OBB (Oriented Bounding Box) model that locates circular codes in images and outputs bounding box + rotation angle. Training uses synthetic data generated from the real SVG renderer via the [ultralytics](https://docs.ultralytics.com/) toolkit.
+The detector uses a custom multi-head CNN built on MobileNetV2 that predicts everything the scanner needs in a single forward pass:
+
+| Head | Output | Activation | Description |
+|------|--------|------------|-------------|
+| **presence** | 1 value | sigmoid | Is there a circular code in the image? |
+| **geometry** | 3 values | sigmoid | Center (cx, cy) and radius, normalized 0-1 |
+| **corners** | 8 values | sigmoid | 4 keypoint coordinates for direct homography |
+| **orientation** | 2 values | tanh | sin/cos of the orientation ring angle |
+| **reflection** | 1 value | sigmoid | Is the code mirror-reflected? |
+
+Training uses synthetic data generated from the real SVG renderer with full 3D perspective transforms, random reflections, noise, and lighting variation.
 
 ### Prerequisites
 
-Python 3.9+ with ultralytics:
+Python 3.9+ with TensorFlow and tensorflowjs:
 
 ```bash
 cd training
@@ -166,17 +179,27 @@ npm run build
 npm run generate-dataset
 ```
 
-Produces 10,000 images (8,000 positive + 2,000 negative) with an 85/15 train/val split in YOLO OBB format. Positive samples use the SVG renderer with randomly generated text (URLs, phrases, alphanumeric tokens, numbers), varied ring/segment configs, dual-color rendering, rotation, skew, scale, noise, lighting variation, and background clutter.
+Produces 12,000 images (8,000 positive + 4,000 negative) with an 85/15 train/val split. Positive samples use the SVG renderer with:
+
+- Randomly generated text (URLs, phrases, alphanumeric tokens, numbers)
+- Varied ring/segment configs (3-6 rings, 32/48/64 segments)
+- Full 3D perspective transforms (pitch, yaw, roll with focal-length projection)
+- ~40% horizontal reflection (simulating transparent/mirror viewing)
+- Dual-color rendering, noise, lighting gradients, blur, and background clutter
 
 Output structure:
 ```
 dataset/
   images/train/    Training images (320x320 PNG)
   images/val/      Validation images
-  labels/train/    OBB labels: class_id x1 y1 x2 y2 x3 y3 x4 y4
-  labels/val/      Validation labels (empty file = no object)
-  data.yaml        YOLO dataset config
+  labels/train/    15-value labels per image
+  labels/val/      Validation labels
   manifest.json    Dataset metadata
+```
+
+Label format (space-separated, normalized 0-1):
+```
+present cx cy radius c1x c1y c2x c2y c3x c3y c4x c4y sin_orient cos_orient reflected
 ```
 
 ### Step 2: Train the Model
@@ -185,27 +208,21 @@ dataset/
 python training/train.py
 ```
 
-Trains a YOLOv8n-OBB model and auto-exports to TF.js format at `models/circular_code/`.
+Trains in two phases:
+1. **Frozen backbone** — MobileNetV2 weights locked, heads train for ~1/3 of epochs
+2. **Fine-tuning** — Upper backbone layers unfrozen, full model trains at reduced learning rate
+
+The model auto-exports to TF.js format at `models/circular_code/`.
 
 Options:
 
 ```bash
-python training/train.py --epochs 40 --batch-size 32
+python training/train.py --epochs 80 --batch-size 32
 python training/train.py --dataset ./my_dataset --output ./my_model
-python training/train.py --resume runs/obb/runs/train/circular_code/weights/best.pt
-python training/train.py --base-model yolov8s-obb.pt  # use a larger model
+python training/train.py --lr 0.0005 --fine-tune-at 120
 ```
 
-### Step 3: Re-export (Optional)
-
-If you want to re-export a previously trained model to TF.js without retraining:
-
-```python
-from ultralytics import YOLO
-YOLO("runs/obb/runs/train/circular_code/weights/best.pt").export(format="tfjs", imgsz=320)
-```
-
-### Step 4: Verify
+### Step 3: Verify
 
 Run the model accuracy test against the dataset:
 
@@ -213,7 +230,7 @@ Run the model accuracy test against the dataset:
 npx vitest run tests/model.test.ts
 ```
 
-This loads the TF.js model, runs inference on sampled positive/negative images, and checks classification accuracy (>=80%) and bounding box quality.
+This loads the TF.js model, runs inference on sampled positive/negative images, and checks classification accuracy (>=80%), geometry quality, and reflection prediction accuracy.
 
 ## End-to-End Cheat Sheet
 
@@ -229,7 +246,7 @@ cd training && bash setup_venv.sh && source venv/bin/activate && cd ..
 # Generate dataset and train
 npm run build
 npm run generate-dataset
-python training/train.py --epochs 40
+python training/train.py --epochs 80
 
 # Verify model quality
 npx vitest run tests/model.test.ts
@@ -250,26 +267,57 @@ Text -> UTF-8 bytes -> [version, length, ...data] header
          innermost ring is reserved as a visual spacer)
 ```
 
+### Visual Structure
+
+```
+┌─────────────────────────┐
+│    Orientation Ring      │  Outer: 3 asymmetric arcs (180°, 90°, 45°)
+│  ┌───────────────────┐  │
+│  │   Data Rings 1-N   │  │  Concentric arcs encoding data bits
+│  │  ┌─────────────┐  │  │
+│  │  │  Spacer (r0) │  │  │  Visual separator (no data)
+│  │  │  ┌───────┐   │  │  │
+│  │  │  │ Center │   │  │  │  Filled dot for detection anchor
+│  │  │  └───────┘   │  │  │
+│  │  └─────────────┘  │  │
+│  └───────────────────┘  │
+└─────────────────────────┘
+```
+
 ### Scanning Pipeline
 
 ```
 Video frame -> Capture 320x320
-            -> Detect (YOLO OBB model if loaded, else Hough circles)
+            -> ML detection (multi-head CNN):
+               - Presence: code detected?
+               - Geometry: cx, cy, radius
+               - Corners: 4 keypoints for homography
+               - Orientation: sin/cos of rotation angle
+               - Reflection: is the code mirrored?
             -> Score frame (sharpness + contrast)
-            -> Rotation-aware perspective correction (4-point homography using detected angle)
+            -> Perspective correction (homography from predicted corners)
+            -> Flip if reflected
             -> Polar grid sampling
             -> RS decode -> Multi-frame consensus -> Result
+
+Fallback: Hough circle detection + estimated corners (when model unavailable)
 ```
 
 ### Model Architecture
 
 ```
-YOLOv8n-OBB (Oriented Bounding Box)
-Input: 320x320x3, normalized to [0, 1]
-Output: [1, 6, N] — N detection candidates
-  Per candidate: [cx, cy, w, h, angle, class_score]
+MobileNetV2 backbone (pretrained ImageNet, fine-tuned)
+  -> GlobalAveragePooling2D
+  -> Dense(256, relu) + Dropout(0.3)    [shared features]
+  -> Dense(64, relu)  -> Dense(1, sigmoid)    [presence]
+  -> Dense(128, relu) -> Dense(3, sigmoid)    [geometry: cx, cy, r]
+  -> Dense(128, relu) -> Dense(64, relu) -> Dense(8, sigmoid)  [corners]
+  -> Dense(64, relu)  -> Dense(2, tanh)       [orientation: sin, cos]
+  -> Dense(64, relu)  -> Dense(1, sigmoid)    [reflection]
 
-Exported to TF.js GraphModel format (~9 MB)
+Input: 320x320x3, normalized to [0, 1]
+Total outputs: 15 values
+Exported to TF.js LayersModel format
 ```
 
 ## API Reference
@@ -287,8 +335,8 @@ Exported to TF.js GraphModel format (~9 MB)
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `renderSVG` | `(code: EncodedCode, opts?: SVGRenderOptions \| number) => string` | Render as SVG string with primary/secondary colors |
-| `renderCanvas` | `(code: EncodedCode, size?: number) => HTMLCanvasElement` | Render to canvas element |
+| `renderSVG` | `(code: EncodedCode, opts?: SVGRenderOptions \| number) => string` | Render as SVG string with primary/secondary colors and orientation ring |
+| `renderCanvas` | `(code: EncodedCode, size?: number) => HTMLCanvasElement` | Render to canvas element (delegates to SVG renderer) |
 
 ### Scanning
 
@@ -298,7 +346,22 @@ Exported to TF.js GraphModel format (~9 MB)
 | `processFrame` | `(video: HTMLVideoElement, opts?) => ScanResult \| null` | Process a single frame |
 | `loadModel` | `(path?: string) => Promise<void>` | Load TF.js detection model |
 | `loadModelFromFiles` | `(json, specs, data) => Promise<void>` | Load model from buffers (Node.js) |
-| `parseDetections` | `(data, shape, frameW, frameH, threshold?) => DetectionResult \| null` | Parse YOLO output tensor into a detection |
+| `parseDetections` | `(data, shape, frameW, frameH, threshold?) => DetectionResult \| null` | Parse legacy YOLO output tensor into a detection |
+
+### Types
+
+```typescript
+type DetectionResult = {
+  cx: number;
+  cy: number;
+  r: number;
+  corners?: Point[];      // 4 keypoints from model for direct homography
+  confidence: number;
+  angle?: number;         // rotation angle (radians)
+  orientation?: number;   // orientation ring angle (radians)
+  reflected?: boolean;    // true if code is mirror-reflected
+};
+```
 
 ### React
 

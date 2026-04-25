@@ -159,10 +159,10 @@ describe("MultiHeadOutput", () => {
     const output = makeMultiHeadOutput({
       corners: new Float32Array([0.1, 0.2, 0.9, 0.2, 0.9, 0.8, 0.1, 0.8]),
     });
-    expect(output.corners[0]).toBe(0.1);
-    expect(output.corners[1]).toBe(0.2);
-    expect(output.corners[6]).toBe(0.1);
-    expect(output.corners[7]).toBe(0.8);
+    expect(output.corners[0]).toBeCloseTo(0.1, 5);
+    expect(output.corners[1]).toBeCloseTo(0.2, 5);
+    expect(output.corners[6]).toBeCloseTo(0.1, 5);
+    expect(output.corners[7]).toBeCloseTo(0.8, 5);
   });
 
   it("geometry contains cx, cy, radius", () => {
