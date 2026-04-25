@@ -257,7 +257,12 @@ async function generatePositive(index: number, split: "train" | "val"): Promise<
   const yawDeg = random(-30, 30);
 
   const { matrix, corners } = buildPerspectiveTransform(
-    cx, cy, codeSize, rotation, pitchDeg, yawDeg,
+    cx,
+    cy,
+    codeSize,
+    rotation,
+    pitchDeg,
+    yawDeg,
   );
 
   ctx.save();
@@ -314,10 +319,14 @@ async function generatePositive(index: number, split: "train" | "val"): Promise<
     cy: clamp01(cy / SIZE),
     radius: clamp01(apparentRadius / SIZE),
     corners: [
-      clamp01(finalCorners[0][0] / SIZE), clamp01(finalCorners[0][1] / SIZE),
-      clamp01(finalCorners[1][0] / SIZE), clamp01(finalCorners[1][1] / SIZE),
-      clamp01(finalCorners[2][0] / SIZE), clamp01(finalCorners[2][1] / SIZE),
-      clamp01(finalCorners[3][0] / SIZE), clamp01(finalCorners[3][1] / SIZE),
+      clamp01(finalCorners[0][0] / SIZE),
+      clamp01(finalCorners[0][1] / SIZE),
+      clamp01(finalCorners[1][0] / SIZE),
+      clamp01(finalCorners[1][1] / SIZE),
+      clamp01(finalCorners[2][0] / SIZE),
+      clamp01(finalCorners[2][1] / SIZE),
+      clamp01(finalCorners[3][0] / SIZE),
+      clamp01(finalCorners[3][1] / SIZE),
     ],
     orientationSin: Math.sin(effectiveRotation),
     orientationCos: Math.cos(effectiveRotation),
@@ -326,16 +335,24 @@ async function generatePositive(index: number, split: "train" | "val"): Promise<
 
   const values = [
     label.present,
-    label.cx, label.cy, label.radius,
+    label.cx,
+    label.cy,
+    label.radius,
     ...label.corners,
-    label.orientationSin, label.orientationCos,
+    label.orientationSin,
+    label.orientationCos,
     label.reflected,
   ];
   const labelPath = path.join(OUT_DIR, "labels", split, `${index}.txt`);
   fs.writeFileSync(labelPath, values.map((v) => v.toFixed(6)).join(" "));
 }
 
-function drawConcentricCircles(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxR: number): void {
+function drawConcentricCircles(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  maxR: number,
+): void {
   const numRings = randomInt(3, 7);
   const ringWidth = maxR / numRings;
   ctx.strokeStyle = randomColor(0, 80);
@@ -405,7 +422,12 @@ function drawClockFace(ctx: CanvasRenderingContext2D, cx: number, cy: number, ma
   }
 }
 
-function drawDashedRings(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxR: number): void {
+function drawDashedRings(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  maxR: number,
+): void {
   const numRings = randomInt(3, 6);
   const ringWidth = maxR / numRings;
   ctx.strokeStyle = randomColor(0, 80);
@@ -424,7 +446,12 @@ function drawDashedRings(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   }
 }
 
-function drawCenterDotWithRings(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxR: number): void {
+function drawCenterDotWithRings(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  maxR: number,
+): void {
   ctx.fillStyle = randomColor(0, 60);
   ctx.beginPath();
   ctx.arc(cx, cy, maxR * 0.1, 0, Math.PI * 2);
@@ -539,7 +566,8 @@ async function main(): Promise<void> {
     positive: POSITIVE_COUNT,
     negative: NEGATIVE_COUNT,
     imageSize: SIZE,
-    labelFormat: "present cx cy radius c1x c1y c2x c2y c3x c3y c4x c4y sin_orient cos_orient reflected",
+    labelFormat:
+      "present cx cy radius c1x c1y c2x c2y c3x c3y c4x c4y sin_orient cos_orient reflected",
     labelCount: 15,
     trainCount: posValStart + negValStart,
     valCount: POSITIVE_COUNT - posValStart + (NEGATIVE_COUNT - negValStart),

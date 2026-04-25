@@ -1,4 +1,12 @@
-import type { DetectionResult, FrameScore, ImageBuffer, Point, ScanOptions, ScanResult } from "@/types";
+import type { ValidationResult } from "@/scan/validator";
+import type {
+  DetectionResult,
+  FrameScore,
+  ImageBuffer,
+  Point,
+  ScanOptions,
+  ScanResult,
+} from "@/types";
 
 import { decode } from "@/core/decoder";
 import { detectWithModel, isModelLoaded, loadModel } from "@/ml/detector";
@@ -8,7 +16,6 @@ import { scoreFrame } from "@/scan/frameScorer";
 import { estimateCircleCorners, warpPerspective } from "@/scan/perspective";
 import { samplePolarGrid } from "@/scan/sampler";
 import { validateCircularCode } from "@/scan/validator";
-import type { ValidationResult } from "@/scan/validator";
 import { canvasToBuffer, captureFrameToBuffer, flipBufferHorizontal } from "@/utils/image";
 
 const CAPTURE_SIZE = 320;
@@ -119,7 +126,12 @@ export function scanFrame(
   }
 
   const validation = validateCircularCode(rectified, rings, codeSize);
-  const frameScoreResult = scoreFrame(captured, activeDetection.cx, activeDetection.cy, activeDetection.r);
+  const frameScoreResult = scoreFrame(
+    captured,
+    activeDetection.cx,
+    activeDetection.cy,
+    activeDetection.r,
+  );
 
   const bits = samplePolarGrid(
     rectified,

@@ -1,12 +1,12 @@
 import type { EncodedCode } from "@/types";
 
 import {
+  getOrientationArcs,
+  getOrientationRingRadius,
   getRingRadius,
   getRingWidth,
   getSegmentAngle,
   getSegmentsForRing,
-  getOrientationRingRadius,
-  getOrientationArcs,
   isDataRing,
 } from "@/core/layout";
 

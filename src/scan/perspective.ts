@@ -90,9 +90,15 @@ export function warpPerspective(
   ];
 
   const H = solveHomography(dstCorners, srcCorners);
-  const h0 = H[0], h1 = H[1], h2 = H[2];
-  const h3 = H[3], h4 = H[4], h5 = H[5];
-  const h6 = H[6], h7 = H[7], h8 = H[8];
+  const h0 = H[0],
+    h1 = H[1],
+    h2 = H[2];
+  const h3 = H[3],
+    h4 = H[4],
+    h5 = H[5];
+  const h6 = H[6],
+    h7 = H[7],
+    h8 = H[8];
 
   const srcPixels = src.data;
   const srcW = src.width;

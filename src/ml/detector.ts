@@ -115,9 +115,20 @@ export type MultiHeadOutput = {
 function parseMultiHeadOutput(
   prediction: tf.Tensor | tf.Tensor[] | { [key: string]: tf.Tensor },
 ): MultiHeadOutput | null {
-  if (prediction && typeof prediction === "object" && !Array.isArray(prediction) && !(prediction instanceof tf.Tensor)) {
+  if (
+    prediction &&
+    typeof prediction === "object" &&
+    !Array.isArray(prediction) &&
+    !(prediction instanceof tf.Tensor)
+  ) {
     const dict = prediction as { [key: string]: tf.Tensor };
-    if (dict["presence"] && dict["geometry"] && dict["corners"] && dict["orientation"] && dict["reflection"]) {
+    if (
+      dict["presence"] &&
+      dict["geometry"] &&
+      dict["corners"] &&
+      dict["orientation"] &&
+      dict["reflection"]
+    ) {
       return {
         presence: dict["presence"].dataSync() as Float32Array,
         geometry: dict["geometry"].dataSync() as Float32Array,
@@ -169,7 +180,9 @@ function multiHeadToDetection(
   const reflected = output.reflection[0] > 0.5;
 
   return {
-    cx, cy, r,
+    cx,
+    cy,
+    r,
     corners,
     confidence,
     angle: orientation,
@@ -197,9 +210,10 @@ export function detectWithModel(buf: ImageBuffer): DetectionResult | null {
   let result: DetectionResult | null = null;
 
   tf.tidy(() => {
-    const resized = buf.width === MODEL_INPUT_SIZE && buf.height === MODEL_INPUT_SIZE
-      ? bufferToTensor(buf)
-      : bufferToTensor(buf).resizeBilinear([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
+    const resized =
+      buf.width === MODEL_INPUT_SIZE && buf.height === MODEL_INPUT_SIZE
+        ? bufferToTensor(buf)
+        : bufferToTensor(buf).resizeBilinear([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
 
     const pred = runModelPrediction(model!, resized);
 

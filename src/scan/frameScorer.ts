@@ -2,12 +2,7 @@ import type { FrameScore, ImageBuffer } from "@/types";
 
 import { toGrayscale } from "@/utils/image";
 
-export function scoreFrame(
-  buf: ImageBuffer,
-  cx: number,
-  cy: number,
-  r: number,
-): FrameScore {
+export function scoreFrame(buf: ImageBuffer, cx: number, cy: number, r: number): FrameScore {
   const { data, width, height } = buf;
 
   const left = Math.max(0, Math.floor(cx - r));
