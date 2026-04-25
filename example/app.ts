@@ -234,11 +234,32 @@ function scanLoop() {
   );
   octx.stroke();
 
-  octx.fillStyle = octx.strokeStyle;
+  if (detection.corners && detection.corners.length === 4) {
+    octx.strokeStyle = "#00ffff";
+    octx.lineWidth = 2;
+    octx.beginPath();
+    const c = detection.corners;
+    octx.moveTo(offsetX + c[0].x * scaleX, offsetY + c[0].y * scaleX);
+    for (let ci = 1; ci < 4; ci++) {
+      octx.lineTo(offsetX + c[ci].x * scaleX, offsetY + c[ci].y * scaleX);
+    }
+    octx.closePath();
+    octx.stroke();
+    for (let ci = 0; ci < 4; ci++) {
+      octx.fillStyle = "#00ffff";
+      octx.beginPath();
+      octx.arc(offsetX + c[ci].x * scaleX, offsetY + c[ci].y * scaleX, 4, 0, Math.PI * 2);
+      octx.fill();
+    }
+  }
+
+  octx.fillStyle = detection.confidence > 0.5 ? "#00ff00" : "#ff0000";
   octx.font = "14px monospace";
   const angleDeg = detection.angle != null ? ` ang: ${(detection.angle * 180 / Math.PI).toFixed(0)}` : "";
+  const orientDeg = detection.orientation != null ? ` ori: ${(detection.orientation * 180 / Math.PI).toFixed(0)}` : "";
+  const reflTag = detection.reflected ? " REFLECTED" : "";
   octx.fillText(
-    `conf: ${(detection.confidence * 100).toFixed(0)}% r: ${detection.r.toFixed(0)} (${detection.cx.toFixed(0)},${detection.cy.toFixed(0)})${angleDeg}`,
+    `conf: ${(detection.confidence * 100).toFixed(0)}% r: ${detection.r.toFixed(0)} (${detection.cx.toFixed(0)},${detection.cy.toFixed(0)})${angleDeg}${orientDeg}${reflTag}`,
     8, 20,
   );
 
@@ -250,11 +271,16 @@ function scanLoop() {
   if (debugCanvas.height !== codeSize) debugCanvas.height = codeSize;
 
   const useDet = detection.confidence >= 0.5;
-  const warpCx = useDet ? detection.cx : captureSize / 2;
-  const warpCy = useDet ? detection.cy : captureSize / 2;
-  const warpR = useDet ? detection.r : captureSize * 0.35;
-  const warpAngle = useDet ? (detection.angle ?? 0) : 0;
-  const srcCorners = estimateCircleCorners(warpCx, warpCy, warpR, 1.15, warpAngle);
+  let srcCorners;
+  if (useDet && detection.corners && detection.corners.length === 4) {
+    srcCorners = detection.corners;
+  } else {
+    const warpCx = useDet ? detection.cx : captureSize / 2;
+    const warpCy = useDet ? detection.cy : captureSize / 2;
+    const warpR = useDet ? detection.r : captureSize * 0.35;
+    const warpAngle = useDet ? (detection.angle ?? 0) : 0;
+    srcCorners = estimateCircleCorners(warpCx, warpCy, warpR, 1.15, warpAngle);
+  }
   const warped = warpPerspective(captured, srcCorners, codeSize);
   debugCtx.drawImage(warped, 0, 0);
 

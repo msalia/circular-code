@@ -6,6 +6,7 @@ import { MultiFrameConsensus } from "@/scan/consensus";
 import { detectCircle } from "@/scan/detector";
 import { scoreFrame } from "@/scan/frameScorer";
 import { estimateCircleCorners, warpPerspective } from "@/scan/perspective";
+import { getOrCreateCanvas } from "@/utils/canvas";
 import { samplePolarGrid } from "@/scan/sampler";
 import { validateCircularCode } from "@/scan/validator";
 import { captureFrame } from "@/utils/image";
@@ -81,19 +82,41 @@ function detect(canvas: HTMLCanvasElement): DetectionResult {
   return detectCircle(canvas);
 }
 
+function getCornersForWarp(detection: DetectionResult): { x: number; y: number }[] {
+  if (detection.corners && detection.corners.length === 4) {
+    return detection.corners;
+  }
+  return estimateCircleCorners(
+    detection.cx,
+    detection.cy,
+    detection.r,
+    1.15,
+    detection.angle ?? 0,
+  );
+}
+
+function flipHorizontal(src: HTMLCanvasElement): HTMLCanvasElement {
+  const { canvas, ctx } = getOrCreateCanvas(src.width, "flipH");
+  canvas.height = src.height;
+  ctx.translate(src.width, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(src, 0, 0);
+  return canvas;
+}
+
 function sampleAndDecode(
   canvas: HTMLCanvasElement,
-  cx: number,
-  cy: number,
-  r: number,
+  detection: DetectionResult,
   rings: number,
   segmentsPerRing: number,
   eccBytes: number,
-  angle = 0,
 ): string {
-  const srcCorners = estimateCircleCorners(cx, cy, r, 1.15, angle);
+  const srcCorners = getCornersForWarp(detection);
+  let rectified = warpPerspective(canvas, srcCorners, CODE_SIZE);
 
-  const rectified = warpPerspective(canvas, srcCorners, CODE_SIZE);
+  if (detection.reflected) {
+    rectified = flipHorizontal(rectified);
+  }
 
   const validation = validateCircularCode(rectified, rings, CODE_SIZE);
   if (!validation.valid) {
@@ -125,7 +148,6 @@ export function processFrame(
 
   const captured = captureFrame(video, CAPTURE_SIZE);
 
-  // Try ML/Hough detection first
   const detection = detect(captured);
 
   if (detection.confidence >= 0.5) {
@@ -133,16 +155,7 @@ export function processFrame(
 
     if (frameScore.overall >= minFrameScore) {
       try {
-        const data = sampleAndDecode(
-          captured,
-          detection.cx,
-          detection.cy,
-          detection.r,
-          rings,
-          segmentsPerRing,
-          eccBytes,
-          detection.angle ?? 0,
-        );
+        const data = sampleAndDecode(captured, detection, rings, segmentsPerRing, eccBytes);
         return { data, confidence: detection.confidence, frameScore };
       } catch {
         // detection-based decode failed, fall through to center crop
@@ -154,8 +167,9 @@ export function processFrame(
   const cx = CAPTURE_SIZE / 2;
   const cy = CAPTURE_SIZE / 2;
   const r = CAPTURE_SIZE * 0.35;
+  const fallback: DetectionResult = { cx, cy, r, confidence: 0 };
 
-  const data = sampleAndDecode(captured, cx, cy, r, rings, segmentsPerRing, eccBytes);
+  const data = sampleAndDecode(captured, fallback, rings, segmentsPerRing, eccBytes);
   const frameScore = scoreFrame(captured, cx, cy, r);
 
   return {

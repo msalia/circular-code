@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { parseDetections, MODEL_INPUT_SIZE } from "@/ml/detector";
+import type { MultiHeadOutput } from "@/ml/detector";
 
 function toLogit(p: number): number {
   return Math.log(p / (1 - p));
@@ -23,7 +24,18 @@ function makeYoloOutput(
   return { data, shape: [1, 5, numCandidates] };
 }
 
-describe("parseDetections", () => {
+function makeMultiHeadOutput(overrides: Partial<MultiHeadOutput> = {}): MultiHeadOutput {
+  return {
+    presence: new Float32Array([0.9]),
+    geometry: new Float32Array([0.5, 0.5, 0.3]),
+    corners: new Float32Array([0.2, 0.2, 0.8, 0.2, 0.8, 0.8, 0.2, 0.8]),
+    orientation: new Float32Array([Math.sin(0.5), Math.cos(0.5)]),
+    reflection: new Float32Array([0.0]),
+    ...overrides,
+  };
+}
+
+describe("parseDetections (YOLO legacy)", () => {
   it("returns null for low confidence", () => {
     const { data, shape } = makeYoloOutput(160, 160, 100, 100, 0.3);
     expect(parseDetections(data, shape, 640, 480)).toBeNull();
@@ -111,5 +123,64 @@ describe("parseDetections", () => {
     const { data, shape } = makeYoloOutput(160, 160, 100, 100, 0.9);
     const result = parseDetections(data, shape, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE)!;
     expect(result.angle).toBeUndefined();
+  });
+});
+
+describe("MultiHeadOutput", () => {
+  it("has correct structure", () => {
+    const output = makeMultiHeadOutput();
+    expect(output.presence).toHaveLength(1);
+    expect(output.geometry).toHaveLength(3);
+    expect(output.corners).toHaveLength(8);
+    expect(output.orientation).toHaveLength(2);
+    expect(output.reflection).toHaveLength(1);
+  });
+
+  it("reflection flag defaults to not reflected", () => {
+    const output = makeMultiHeadOutput();
+    expect(output.reflection[0]).toBe(0);
+  });
+
+  it("reflection flag can be set to reflected", () => {
+    const output = makeMultiHeadOutput({ reflection: new Float32Array([1.0]) });
+    expect(output.reflection[0]).toBe(1.0);
+  });
+
+  it("orientation encodes sin/cos pair", () => {
+    const angle = 1.23;
+    const output = makeMultiHeadOutput({
+      orientation: new Float32Array([Math.sin(angle), Math.cos(angle)]),
+    });
+    const recoveredAngle = Math.atan2(output.orientation[0], output.orientation[1]);
+    expect(recoveredAngle).toBeCloseTo(angle, 5);
+  });
+
+  it("corners represent 4 keypoints as 8 values", () => {
+    const output = makeMultiHeadOutput({
+      corners: new Float32Array([0.1, 0.2, 0.9, 0.2, 0.9, 0.8, 0.1, 0.8]),
+    });
+    expect(output.corners[0]).toBe(0.1);
+    expect(output.corners[1]).toBe(0.2);
+    expect(output.corners[6]).toBe(0.1);
+    expect(output.corners[7]).toBe(0.8);
+  });
+
+  it("geometry contains cx, cy, radius", () => {
+    const output = makeMultiHeadOutput({
+      geometry: new Float32Array([0.4, 0.6, 0.25]),
+    });
+    expect(output.geometry[0]).toBeCloseTo(0.4);
+    expect(output.geometry[1]).toBeCloseTo(0.6);
+    expect(output.geometry[2]).toBeCloseTo(0.25);
+  });
+
+  it("low presence indicates no code detected", () => {
+    const output = makeMultiHeadOutput({ presence: new Float32Array([0.1]) });
+    expect(output.presence[0]).toBeLessThan(0.5);
+  });
+
+  it("high presence indicates code detected", () => {
+    const output = makeMultiHeadOutput({ presence: new Float32Array([0.95]) });
+    expect(output.presence[0]).toBeGreaterThan(0.5);
   });
 });

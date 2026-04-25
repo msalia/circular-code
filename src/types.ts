@@ -22,6 +22,8 @@ export type DetectionResult = {
   corners?: Point[];
   confidence: number;
   angle?: number;
+  orientation?: number;
+  reflected?: boolean;
 };
 
 export type FrameScore = {

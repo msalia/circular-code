@@ -5,6 +5,8 @@ import {
   getRingWidth,
   getSegmentAngle,
   getSegmentsForRing,
+  getOrientationRingRadius,
+  getOrientationArcs,
   isDataRing,
 } from "@/core/layout";
 
@@ -131,11 +133,30 @@ export function renderSVG(code: EncodedCode, opts: SVGRenderOptions | number = {
 
   const centerRadius = ringWidth * CENTER_RADIUS_RATIO;
 
+  let orientationPaths = "";
+  const orientationRadius = getOrientationRingRadius(rings, size);
+  const orientationStroke = ringWidth * STROKE_WIDTH_RATIO;
+  for (const arc of getOrientationArcs()) {
+    const sweep = arc.end - arc.start;
+    const largeArc = sweep > Math.PI ? 1 : 0;
+    const x1 = cx + orientationRadius * Math.cos(arc.start);
+    const y1 = cy + orientationRadius * Math.sin(arc.start);
+    const x2 = cx + orientationRadius * Math.cos(arc.end);
+    const y2 = cy + orientationRadius * Math.sin(arc.end);
+    orientationPaths += `
+        <path d="M ${x1} ${y1} A ${orientationRadius} ${orientationRadius} 0 ${largeArc} 1 ${x2} ${y2}"
+          stroke-width="${orientationStroke}"
+          fill="none"
+          stroke-linecap="round"/>`;
+  }
+
   return `
     <svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">
       <g stroke="${secondary}">${secondaryPaths}
       </g>
       <g stroke="${primary}">${primaryPaths}
+      </g>
+      <g stroke="${primary}">${orientationPaths}
       </g>
       <circle cx="${cx}" cy="${cy}" r="${centerRadius}" fill="${primary}" />
     </svg>

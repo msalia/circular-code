@@ -155,30 +155,82 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
-function rotatedCorners(
+type PerspectiveTransform = {
+  matrix: [number, number, number, number, number, number];
+  corners: [number, number][];
+};
+
+function buildPerspectiveTransform(
   cx: number,
   cy: number,
-  w: number,
-  h: number,
-  angle: number,
-): [number, number, number, number, number, number, number, number] {
-  const cos = Math.cos(angle);
-  const sin = Math.sin(angle);
-  const hw = w / 2;
-  const hh = h / 2;
-  const corners = [
-    [-hw, -hh],
-    [hw, -hh],
-    [hw, hh],
-    [-hw, hh],
+  codeSize: number,
+  rotation: number,
+  pitchDeg: number,
+  yawDeg: number,
+): PerspectiveTransform {
+  const pitch = (pitchDeg * Math.PI) / 180;
+  const yaw = (yawDeg * Math.PI) / 180;
+
+  const cosR = Math.cos(rotation);
+  const sinR = Math.sin(rotation);
+  const cosP = Math.cos(pitch);
+  const sinP = Math.sin(pitch);
+  const cosY = Math.cos(yaw);
+  const sinY = Math.sin(yaw);
+
+  const half = codeSize / 2;
+  const localCorners: [number, number][] = [
+    [-half, -half],
+    [half, -half],
+    [half, half],
+    [-half, half],
   ];
-  const result: number[] = [];
-  for (const [dx, dy] of corners) {
-    result.push(clamp01(cx + dx * cos - dy * sin));
-    result.push(clamp01(cy + dx * sin + dy * cos));
-  }
-  return result as [number, number, number, number, number, number, number, number];
+
+  const focalLength = SIZE * 2.5;
+
+  const projected: [number, number][] = localCorners.map(([lx, ly]) => {
+    let x = lx * cosR - ly * sinR;
+    let y = lx * sinR + ly * cosR;
+    let z = 0;
+
+    const x2 = x;
+    const y2 = y * cosP - z * sinP;
+    const z2 = y * sinP + z * cosP;
+
+    const x3 = x2 * cosY + z2 * sinY;
+    const y3 = y2;
+    const z3 = -x2 * sinY + z2 * cosY;
+
+    const depth = focalLength + z3;
+    const scale = focalLength / Math.max(depth, 1);
+    return [cx + x3 * scale, cy + y3 * scale];
+  });
+
+  const scaleX = cosY * cosR;
+  const skewX = -cosY * sinR;
+  const skewY = cosP * sinR + sinP * sinY * cosR;
+  const scaleY = cosP * cosR - sinP * sinY * sinR;
+
+  return {
+    matrix: [scaleX, skewY, skewX, scaleY, 0, 0],
+    corners: projected,
+  };
 }
+
+export type PositiveLabel = {
+  present: 1;
+  cx: number;
+  cy: number;
+  radius: number;
+  corners: [number, number, number, number, number, number, number, number];
+  orientationSin: number;
+  orientationCos: number;
+  reflected: 0 | 1;
+};
+
+export type NegativeLabel = {
+  present: 0;
+};
 
 async function generatePositive(index: number, split: "train" | "val"): Promise<void> {
   const canvas = createCanvas(SIZE, SIZE);
@@ -201,16 +253,16 @@ async function generatePositive(index: number, split: "train" | "val"): Promise<
   const cx = SIZE / 2 + random(-40, 40);
   const cy = SIZE / 2 + random(-40, 40);
   const rotation = random(0, Math.PI * 2);
+  const pitchDeg = random(-30, 30);
+  const yawDeg = random(-30, 30);
+
+  const { matrix, corners } = buildPerspectiveTransform(
+    cx, cy, codeSize, rotation, pitchDeg, yawDeg,
+  );
 
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.rotate(rotation);
-
-  const skewX = random(-0.15, 0.15);
-  const skewY = random(-0.15, 0.15);
-  const scaleX = random(0.85, 1.15);
-  const scaleY = random(0.85, 1.15);
-  ctx.transform(scaleX, skewY, skewX, scaleY, 0, 0);
+  ctx.transform(matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5]);
 
   const fgBright = randomInt(0, 60);
   const fgColor = `rgb(${fgBright},${fgBright},${fgBright})`;
@@ -230,17 +282,57 @@ async function generatePositive(index: number, split: "train" | "val"): Promise<
     ctx.drawImage(tmpCanvas, 0, 0);
   }
 
+  const reflected = random(0, 1) < 0.4;
+  if (reflected) {
+    const tmpCanvas = createCanvas(SIZE, SIZE);
+    const tmpCtx = tmpCanvas.getContext("2d");
+    tmpCtx.translate(SIZE, 0);
+    tmpCtx.scale(-1, 1);
+    tmpCtx.drawImage(canvas, 0, 0);
+    ctx.clearRect(0, 0, SIZE, SIZE);
+    ctx.drawImage(tmpCanvas, 0, 0);
+  }
+
   const imgPath = path.join(OUT_DIR, "images", split, `${index}.png`);
   fs.writeFileSync(imgPath, canvas.toBuffer());
 
-  const w = codeSize * scaleX;
-  const h = codeSize * scaleY;
+  const finalCorners: [number, number][] = reflected
+    ? corners.map(([x, y]) => [SIZE - x, y] as [number, number])
+    : corners;
 
-  // YOLO OBB format: class_id x1 y1 x2 y2 x3 y3 x4 y4 (pixel coords, normalized 0-1)
-  const corners = rotatedCorners(cx / SIZE, cy / SIZE, w / SIZE, h / SIZE, rotation);
-  const label = `0 ${corners.map((v) => v.toFixed(6)).join(" ")}`;
+  const cornerDists = finalCorners.map(([x, y]) =>
+    Math.sqrt((x - (reflected ? SIZE - cx : cx)) ** 2 + (y - cy) ** 2),
+  );
+  const apparentRadius = Math.max(...cornerDists) / Math.SQRT2;
+  const finalCx = reflected ? SIZE - cx : cx;
+
+  const effectiveRotation = reflected ? Math.PI - rotation : rotation;
+
+  const label: PositiveLabel = {
+    present: 1,
+    cx: clamp01(finalCx / SIZE),
+    cy: clamp01(cy / SIZE),
+    radius: clamp01(apparentRadius / SIZE),
+    corners: [
+      clamp01(finalCorners[0][0] / SIZE), clamp01(finalCorners[0][1] / SIZE),
+      clamp01(finalCorners[1][0] / SIZE), clamp01(finalCorners[1][1] / SIZE),
+      clamp01(finalCorners[2][0] / SIZE), clamp01(finalCorners[2][1] / SIZE),
+      clamp01(finalCorners[3][0] / SIZE), clamp01(finalCorners[3][1] / SIZE),
+    ],
+    orientationSin: Math.sin(effectiveRotation),
+    orientationCos: Math.cos(effectiveRotation),
+    reflected: reflected ? 1 : 0,
+  };
+
+  const values = [
+    label.present,
+    label.cx, label.cy, label.radius,
+    ...label.corners,
+    label.orientationSin, label.orientationCos,
+    label.reflected,
+  ];
   const labelPath = path.join(OUT_DIR, "labels", split, `${index}.txt`);
-  fs.writeFileSync(labelPath, label);
+  fs.writeFileSync(labelPath, values.map((v) => v.toFixed(6)).join(" "));
 }
 
 function drawConcentricCircles(ctx: CanvasRenderingContext2D, cx: number, cy: number, maxR: number): void {
@@ -409,8 +501,10 @@ function generateNegative(index: number, split: "train" | "val"): void {
   const imgPath = path.join(OUT_DIR, "images", split, `${index}.png`);
   fs.writeFileSync(imgPath, canvas.toBuffer());
 
+  // 15 zeros: present=0, cx=0, cy=0, r=0, 8 corner coords=0, sin=0, cos=0, reflected=0
+  const values = new Array(15).fill(0);
   const labelPath = path.join(OUT_DIR, "labels", split, `${index}.txt`);
-  fs.writeFileSync(labelPath, "");
+  fs.writeFileSync(labelPath, values.map((v: number) => v.toFixed(6)).join(" "));
 }
 
 async function main(): Promise<void> {
@@ -440,24 +534,13 @@ async function main(): Promise<void> {
     }
   }
 
-  // YOLO OBB data.yaml
-  const dataYaml = `path: ${path.resolve(OUT_DIR)}
-train: images/train
-val: images/val
-
-nc: 1
-names:
-  0: circular_code
-`;
-  fs.writeFileSync(path.join(OUT_DIR, "data.yaml"), dataYaml);
-
   const manifest = {
     total: POSITIVE_COUNT + NEGATIVE_COUNT,
     positive: POSITIVE_COUNT,
     negative: NEGATIVE_COUNT,
     imageSize: SIZE,
-    labelFormat: "yolo-obb: class_id x1 y1 x2 y2 x3 y3 x4 y4",
-    classMap: { 0: "circular_code" },
+    labelFormat: "present cx cy radius c1x c1y c2x c2y c3x c3y c4x c4y sin_orient cos_orient reflected",
+    labelCount: 15,
     trainCount: posValStart + negValStart,
     valCount: POSITIVE_COUNT - posValStart + (NEGATIVE_COUNT - negValStart),
   };
@@ -465,6 +548,7 @@ names:
 
   console.log(`Done. ${POSITIVE_COUNT + NEGATIVE_COUNT} samples written to ${OUT_DIR}/`);
   console.log(`  Train: ${manifest.trainCount}, Val: ${manifest.valCount}`);
+  console.log(`  Label format: ${manifest.labelFormat}`);
 }
 
 main();

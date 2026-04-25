@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { encode } from "@/core/encoder";
-import { getSegmentsForRing, isDataRing } from "@/core/layout";
+import { getRingWidth, getSegmentsForRing, isDataRing } from "@/core/layout";
 import { renderSVG } from "@/render/svgRenderer";
 
 describe("renderSVG", () => {
@@ -33,8 +33,8 @@ describe("renderSVG", () => {
 
   it("does not render arcs for the non-data inner ring", () => {
     const svg = renderSVG(code, { size: 300, primary: "#000", secondary: "#ccc" });
-    const { rings, segmentsPerRing } = code;
-    const innerRingRadius = 300 / (2 * (rings + 2));
+    const { rings } = code;
+    const innerRingRadius = getRingWidth(rings, 300);
     const pathRadii = [...svg.matchAll(/A (\d+\.?\d*) /g)].map((m) => parseFloat(m[1]));
     expect(pathRadii).not.toContain(innerRingRadius);
   });
@@ -77,5 +77,40 @@ describe("renderSVG", () => {
   it("secondary is suppressed when set to none", () => {
     const svg = renderSVG(code, { secondary: "none" });
     expect(svg).toContain('stroke="none"');
+  });
+
+  describe("orientation ring", () => {
+    it("renders 3 orientation arc paths", () => {
+      const svg = renderSVG(code, { size: 300 });
+      const groups = svg.split('<g stroke="#000000"');
+      const orientationGroup = groups[groups.length - 1].split("</g>")[0];
+      const pathCount = (orientationGroup.match(/<path/g) || []).length;
+      expect(pathCount).toBe(3);
+    });
+
+    it("orientation arcs use the primary color", () => {
+      const svg = renderSVG(code, { size: 300, primary: "#ff0000" });
+      const groups = svg.split('<g stroke="#ff0000"');
+      expect(groups.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("orientation arcs are at a larger radius than data rings", () => {
+      const svg = renderSVG(code, { size: 300 });
+      const { rings } = code;
+      const allRadii = [...svg.matchAll(/A (\d+\.?\d*) \1/g)].map((m) => parseFloat(m[1]));
+      const maxDataRadius = (rings) * getRingWidth(rings, 300);
+      const orientationRadii = allRadii.filter((r) => r > maxDataRadius);
+      expect(orientationRadii.length).toBe(3);
+    });
+
+    it("orientation ring is present for all ring counts", () => {
+      for (const rings of [3, 4, 5, 6]) {
+        const c = encode("test", { rings, segmentsPerRing: 48 });
+        const svg = renderSVG(c, { size: 300 });
+        const groups = svg.split('<g stroke="#000000"');
+        const lastGroup = groups[groups.length - 1].split("</g>")[0];
+        expect((lastGroup.match(/<path/g) || []).length).toBe(3);
+      }
+    });
   });
 });

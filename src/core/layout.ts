@@ -1,5 +1,30 @@
 export function getRingWidth(rings: number, size: number): number {
-  return size / (2 * (rings + 2));
+  return size / (2 * (rings + 3));
+}
+
+export function getOrientationRingRadius(rings: number, size: number): number {
+  return (rings + 1) * getRingWidth(rings, size);
+}
+
+export type OrientationArc = { start: number; end: number };
+
+export function getOrientationArcs(): OrientationArc[] {
+  const GAP = Math.PI / 18; // 10° gap between arcs
+  const arcs: OrientationArc[] = [];
+  let cursor = 0;
+
+  // Long arc: ~180°
+  arcs.push({ start: cursor, end: cursor + Math.PI });
+  cursor += Math.PI + GAP;
+
+  // Medium arc: ~90°
+  arcs.push({ start: cursor, end: cursor + Math.PI / 2 });
+  cursor += Math.PI / 2 + GAP;
+
+  // Short arc: ~45°
+  arcs.push({ start: cursor, end: cursor + Math.PI / 4 });
+
+  return arcs;
 }
 
 export function getRingRadius(ring: number, rings: number, size: number): number {

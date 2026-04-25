@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   getRingRadius,
+  getRingWidth,
   getSegmentAngle,
   getSegmentsForRing,
   getTotalSegments,
+  getOrientationRingRadius,
+  getOrientationArcs,
   isDataRing,
 } from "@/core/layout";
 
@@ -17,6 +20,17 @@ describe("layout", () => {
       expect(isDataRing(1)).toBe(true);
       expect(isDataRing(2)).toBe(true);
       expect(isDataRing(5)).toBe(true);
+    });
+  });
+
+  describe("getRingWidth", () => {
+    it("accounts for data rings, spacer ring, and orientation ring", () => {
+      const width = getRingWidth(5, 300);
+      expect(width).toBeCloseTo(300 / (2 * (5 + 3)), 5);
+    });
+
+    it("decreases as ring count increases", () => {
+      expect(getRingWidth(3, 300)).toBeGreaterThan(getRingWidth(5, 300));
     });
   });
 
@@ -87,6 +101,66 @@ describe("layout", () => {
 
     it("full rotation is 2*PI", () => {
       expect(getSegmentAngle(48, 48)).toBeCloseTo(2 * Math.PI, 5);
+    });
+  });
+
+  describe("getOrientationRingRadius", () => {
+    it("is beyond the outermost data ring", () => {
+      const outerDataRadius = getRingRadius(4, 5, 300);
+      const orientationRadius = getOrientationRingRadius(5, 300);
+      expect(orientationRadius).toBeGreaterThan(outerDataRadius);
+    });
+
+    it("equals (rings + 1) * ringWidth", () => {
+      const ringWidth = getRingWidth(5, 300);
+      expect(getOrientationRingRadius(5, 300)).toBeCloseTo((5 + 1) * ringWidth, 5);
+    });
+
+    it("fits within the SVG bounds", () => {
+      const size = 300;
+      const radius = getOrientationRingRadius(5, size);
+      const strokeHalf = getRingWidth(5, size) * 0.5 / 2;
+      expect(radius + strokeHalf).toBeLessThan(size / 2);
+    });
+  });
+
+  describe("getOrientationArcs", () => {
+    const arcs = getOrientationArcs();
+
+    it("returns exactly 3 arcs", () => {
+      expect(arcs).toHaveLength(3);
+    });
+
+    it("arcs are ordered long, medium, short", () => {
+      const spans = arcs.map((a) => a.end - a.start);
+      expect(spans[0]).toBeCloseTo(Math.PI, 5);
+      expect(spans[1]).toBeCloseTo(Math.PI / 2, 5);
+      expect(spans[2]).toBeCloseTo(Math.PI / 4, 5);
+    });
+
+    it("arcs do not overlap", () => {
+      for (let i = 1; i < arcs.length; i++) {
+        expect(arcs[i].start).toBeGreaterThan(arcs[i - 1].end);
+      }
+    });
+
+    it("all arcs fit within a full circle", () => {
+      const lastEnd = arcs[arcs.length - 1].end;
+      expect(lastEnd).toBeLessThan(2 * Math.PI);
+    });
+
+    it("has uniform gap size between arcs", () => {
+      const gap1 = arcs[1].start - arcs[0].end;
+      const gap2 = arcs[2].start - arcs[1].end;
+      expect(gap1).toBeCloseTo(gap2, 5);
+      expect(gap1).toBeCloseTo(Math.PI / 18, 5);
+    });
+
+    it("pattern is asymmetric for unique orientation", () => {
+      const spans = arcs.map((a) => a.end - a.start);
+      expect(spans[0]).not.toBeCloseTo(spans[1], 3);
+      expect(spans[1]).not.toBeCloseTo(spans[2], 3);
+      expect(spans[0]).not.toBeCloseTo(spans[2], 3);
     });
   });
 });

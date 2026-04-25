@@ -46,10 +46,10 @@ export function getLoadedModel(): tf.GraphModel | tf.LayersModel | null {
 export function runModelPrediction(
   mdl: tf.GraphModel | tf.LayersModel,
   input: tf.Tensor,
-): tf.Tensor {
+): tf.Tensor | tf.Tensor[] | { [key: string]: tf.Tensor } {
   return mdl instanceof tf.GraphModel
     ? (mdl.predict(input) as tf.Tensor)
-    : ((mdl as tf.LayersModel).predict(input) as tf.Tensor);
+    : ((mdl as tf.LayersModel).predict(input) as tf.Tensor | tf.Tensor[]);
 }
 
 function sigmoid(x: number): number {
@@ -61,17 +61,17 @@ export function parseDetections(
   outputShape: number[],
   frameW: number,
   frameH: number,
-  confThreshold = 0.5,
+  confThreshold?: number,
 ): DetectionResult | null {
   // YOLOv8-OBB output: [1, 6, N] where channels are [cx, cy, w, h, angle, class_logit]
   // Standard YOLOv8 output: [1, 5, N] where channels are [cx, cy, w, h, class_logit]
-  // Class scores are raw logits — apply sigmoid to get probabilities.
   const channels = outputShape[1];
   const numCandidates = outputShape[2];
   const hasAngle = channels >= 6;
   const confChannel = hasAngle ? 5 : 4;
+  const threshold = confThreshold ?? 0.5;
 
-  let bestConf = confThreshold;
+  let bestConf = threshold;
   let bestIdx = -1;
 
   for (let i = 0; i < numCandidates; i++) {
@@ -106,6 +106,80 @@ export function parseDetections(
   return result;
 }
 
+export type MultiHeadOutput = {
+  presence: Float32Array;
+  geometry: Float32Array;
+  corners: Float32Array;
+  orientation: Float32Array;
+  reflection: Float32Array;
+};
+
+function parseMultiHeadOutput(
+  prediction: tf.Tensor | tf.Tensor[] | { [key: string]: tf.Tensor },
+): MultiHeadOutput | null {
+  if (prediction && typeof prediction === "object" && !Array.isArray(prediction) && !(prediction instanceof tf.Tensor)) {
+    const dict = prediction as { [key: string]: tf.Tensor };
+    if (dict["presence"] && dict["geometry"] && dict["corners"] && dict["orientation"] && dict["reflection"]) {
+      return {
+        presence: dict["presence"].dataSync() as Float32Array,
+        geometry: dict["geometry"].dataSync() as Float32Array,
+        corners: dict["corners"].dataSync() as Float32Array,
+        orientation: dict["orientation"].dataSync() as Float32Array,
+        reflection: dict["reflection"].dataSync() as Float32Array,
+      };
+    }
+  }
+
+  if (Array.isArray(prediction) && prediction.length === 5) {
+    return {
+      presence: prediction[0].dataSync() as Float32Array,
+      geometry: prediction[1].dataSync() as Float32Array,
+      corners: prediction[2].dataSync() as Float32Array,
+      orientation: prediction[3].dataSync() as Float32Array,
+      reflection: prediction[4].dataSync() as Float32Array,
+    };
+  }
+
+  return null;
+}
+
+function multiHeadToDetection(
+  output: MultiHeadOutput,
+  frameW: number,
+  frameH: number,
+  confThreshold = 0.5,
+): DetectionResult | null {
+  const confidence = output.presence[0];
+  if (confidence < confThreshold) return null;
+
+  const cx = output.geometry[0] * frameW;
+  const cy = output.geometry[1] * frameH;
+  const r = output.geometry[2] * Math.max(frameW, frameH);
+
+  const corners = [];
+  for (let i = 0; i < 8; i += 2) {
+    corners.push({
+      x: output.corners[i] * frameW,
+      y: output.corners[i + 1] * frameH,
+    });
+  }
+
+  const sinO = output.orientation[0];
+  const cosO = output.orientation[1];
+  const orientation = Math.atan2(sinO, cosO);
+
+  const reflected = output.reflection[0] > 0.5;
+
+  return {
+    cx, cy, r,
+    corners,
+    confidence,
+    angle: orientation,
+    orientation,
+    reflected,
+  };
+}
+
 export function detectWithModel(canvas: HTMLCanvasElement): DetectionResult | null {
   if (!model) return null;
 
@@ -120,8 +194,16 @@ export function detectWithModel(canvas: HTMLCanvasElement): DetectionResult | nu
       .expandDims(0);
 
     const pred = runModelPrediction(model!, input);
-    const data = pred.dataSync();
-    const shape = pred.shape;
+
+    const multiHead = parseMultiHeadOutput(pred);
+    if (multiHead) {
+      result = multiHeadToDetection(multiHead, canvas.width, canvas.height);
+      return;
+    }
+
+    const singleTensor = pred as tf.Tensor;
+    const data = singleTensor.dataSync();
+    const shape = singleTensor.shape;
     result = parseDetections(data, shape as number[], canvas.width, canvas.height);
   });
 
