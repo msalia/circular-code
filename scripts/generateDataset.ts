@@ -218,18 +218,7 @@ function buildPerspectiveTransform(
 }
 
 export type PositiveLabel = {
-  present: 1;
-  cx: number;
-  cy: number;
-  radius: number;
   corners: [number, number, number, number, number, number, number, number];
-  orientationSin: number;
-  orientationCos: number;
-  reflected: 0 | 1;
-};
-
-export type NegativeLabel = {
-  present: 0;
 };
 
 async function generatePositive(index: number, split: "train" | "val"): Promise<void> {
@@ -287,64 +276,24 @@ async function generatePositive(index: number, split: "train" | "val"): Promise<
     ctx.drawImage(tmpCanvas, 0, 0);
   }
 
-  const reflected = random(0, 1) < 0.4;
-  if (reflected) {
-    const tmpCanvas = createCanvas(SIZE, SIZE);
-    const tmpCtx = tmpCanvas.getContext("2d");
-    tmpCtx.translate(SIZE, 0);
-    tmpCtx.scale(-1, 1);
-    tmpCtx.drawImage(canvas, 0, 0);
-    ctx.clearRect(0, 0, SIZE, SIZE);
-    ctx.drawImage(tmpCanvas, 0, 0);
-  }
-
   const imgPath = path.join(OUT_DIR, "images", split, `${index}.png`);
   fs.writeFileSync(imgPath, canvas.toBuffer());
 
-  const finalCorners: [number, number][] = reflected
-    ? corners.map(([x, y]) => [SIZE - x, y] as [number, number])
-    : corners;
+  // Compute bounding box from corners
+  const xs = corners.map(([x]) => x / SIZE);
+  const ys = corners.map(([, y]) => y / SIZE);
+  const bboxCx = clamp01((Math.min(...xs) + Math.max(...xs)) / 2);
+  const bboxCy = clamp01((Math.min(...ys) + Math.max(...ys)) / 2);
+  const bboxW = clamp01(Math.max(...xs) - Math.min(...xs));
+  const bboxH = clamp01(Math.max(...ys) - Math.min(...ys));
 
-  const cornerDists = finalCorners.map(([x, y]) =>
-    Math.sqrt((x - (reflected ? SIZE - cx : cx)) ** 2 + (y - cy) ** 2),
-  );
-  const apparentRadius = Math.max(...cornerDists) / Math.SQRT2;
-  const finalCx = reflected ? SIZE - cx : cx;
-
-  const effectiveRotation = reflected ? Math.PI - rotation : rotation;
-
-  const label: PositiveLabel = {
-    present: 1,
-    cx: clamp01(finalCx / SIZE),
-    cy: clamp01(cy / SIZE),
-    radius: clamp01(apparentRadius / SIZE),
-    corners: [
-      clamp01(finalCorners[0][0] / SIZE),
-      clamp01(finalCorners[0][1] / SIZE),
-      clamp01(finalCorners[1][0] / SIZE),
-      clamp01(finalCorners[1][1] / SIZE),
-      clamp01(finalCorners[2][0] / SIZE),
-      clamp01(finalCorners[2][1] / SIZE),
-      clamp01(finalCorners[3][0] / SIZE),
-      clamp01(finalCorners[3][1] / SIZE),
-    ],
-    orientationSin: Math.sin(effectiveRotation),
-    orientationCos: Math.cos(effectiveRotation),
-    reflected: reflected ? 1 : 0,
-  };
-
-  const values = [
-    label.present,
-    label.cx,
-    label.cy,
-    label.radius,
-    ...label.corners,
-    label.orientationSin,
-    label.orientationCos,
-    label.reflected,
-  ];
+  // YOLO-Pose: class cx cy w h kp1x kp1y kp1v kp2x kp2y kp2v kp3x kp3y kp3v kp4x kp4y kp4v
+  const kps = corners
+    .map(([x, y]) => `${clamp01(x / SIZE).toFixed(6)} ${clamp01(y / SIZE).toFixed(6)} 2`)
+    .join(" ");
+  const labelLine = `0 ${bboxCx.toFixed(6)} ${bboxCy.toFixed(6)} ${bboxW.toFixed(6)} ${bboxH.toFixed(6)} ${kps}`;
   const labelPath = path.join(OUT_DIR, "labels", split, `${index}.txt`);
-  fs.writeFileSync(labelPath, values.map((v) => v.toFixed(6)).join(" "));
+  fs.writeFileSync(labelPath, labelLine);
 }
 
 function drawConcentricCircles(
@@ -528,10 +477,8 @@ function generateNegative(index: number, split: "train" | "val"): void {
   const imgPath = path.join(OUT_DIR, "images", split, `${index}.png`);
   fs.writeFileSync(imgPath, canvas.toBuffer());
 
-  // 15 zeros: present=0, cx=0, cy=0, r=0, 8 corner coords=0, sin=0, cos=0, reflected=0
-  const values = new Array(15).fill(0);
   const labelPath = path.join(OUT_DIR, "labels", split, `${index}.txt`);
-  fs.writeFileSync(labelPath, values.map((v: number) => v.toFixed(6)).join(" "));
+  fs.writeFileSync(labelPath, "");
 }
 
 async function main(): Promise<void> {
@@ -561,14 +508,27 @@ async function main(): Promise<void> {
     }
   }
 
+  const dataYaml = `path: ${path.resolve(OUT_DIR)}
+train: images/train
+val: images/val
+
+kpt_shape: [4, 3]
+
+nc: 1
+names:
+  0: circular_code
+`;
+  fs.writeFileSync(path.join(OUT_DIR, "data.yaml"), dataYaml);
+
   const manifest = {
     total: POSITIVE_COUNT + NEGATIVE_COUNT,
     positive: POSITIVE_COUNT,
     negative: NEGATIVE_COUNT,
     imageSize: SIZE,
     labelFormat:
-      "present cx cy radius c1x c1y c2x c2y c3x c3y c4x c4y sin_orient cos_orient reflected",
-    labelCount: 15,
+      "yolo-pose: class cx cy w h kp1x kp1y kp1v kp2x kp2y kp2v kp3x kp3y kp3v kp4x kp4y kp4v",
+    classMap: { 0: "circular_code" },
+    keypointNames: ["top_left", "top_right", "bottom_right", "bottom_left"],
     trainCount: posValStart + negValStart,
     valCount: POSITIVE_COUNT - posValStart + (NEGATIVE_COUNT - negValStart),
   };
@@ -576,7 +536,6 @@ async function main(): Promise<void> {
 
   console.log(`Done. ${POSITIVE_COUNT + NEGATIVE_COUNT} samples written to ${OUT_DIR}/`);
   console.log(`  Train: ${manifest.trainCount}, Val: ${manifest.valCount}`);
-  console.log(`  Label format: ${manifest.labelFormat}`);
 }
 
 main();

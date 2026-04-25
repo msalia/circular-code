@@ -229,6 +229,29 @@
 
     .scan-status.active { color: #6cbf6c; }
     .scan-status.error { color: #bf6c6c; }
+
+    .debug-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .debug-step canvas {
+      width: 120px;
+      height: 120px;
+      border-radius: 6px;
+      border: 1px solid #333;
+      background: #111;
+    }
+
+    .debug-step span {
+      font-size: 10px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
   </style>
 </head>
 <body>
@@ -308,8 +331,29 @@
         </label>
       </div>
       <div style="margin-top:12px">
-        <p style="font-size:11px; color:#555; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px">Warped Region</p>
-        <canvas id="debug-warp" width="300" height="300" style="width:100%; max-width:300px; border-radius:8px; border:1px solid #333; background:#111"></canvas>
+        <p style="font-size:11px; color:#555; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px">Pipeline</p>
+        <div id="debug-pipeline" style="display:flex; gap:6px; overflow-x:auto; padding-bottom:4px">
+          <div class="debug-step">
+            <canvas id="dbg-capture" width="120" height="120"></canvas>
+            <span>Capture</span>
+          </div>
+          <div class="debug-step">
+            <canvas id="dbg-detect" width="120" height="120"></canvas>
+            <span>Detect</span>
+          </div>
+          <div class="debug-step">
+            <canvas id="dbg-warp" width="120" height="120"></canvas>
+            <span>Warp</span>
+          </div>
+          <div class="debug-step">
+            <canvas id="dbg-sample" width="120" height="120"></canvas>
+            <span>Sample</span>
+          </div>
+          <div class="debug-step">
+            <canvas id="dbg-result" width="120" height="120"></canvas>
+            <span>Result</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>

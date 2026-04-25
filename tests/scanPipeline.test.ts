@@ -130,16 +130,16 @@ describe("rectifyCode", () => {
     expect(result.corners).toEqual(modelCorners);
   });
 
-  it("flips when reflected flag is set", () => {
-    const buf = makeWhiteBuffer(300);
-    fillRect(buf, 0, 0, 50, 300, 0, 0, 0);
-
-    const normal = rectifyCode(buf, makeDetection({ cx: 150, cy: 150, r: 120 }), 5, 300);
-    const reflected = rectifyCode(buf, makeDetection({ cx: 150, cy: 150, r: 120, reflected: true }), 5, 300);
-
-    const nLeft = normal.image.data[(150 * 300 + 10) * 4];
-    const rLeft = reflected.image.data[(150 * 300 + 10) * 4];
-    expect(nLeft).not.toBe(rLeft);
+  it("returns orientation analysis", () => {
+    const buf = makeWhiteBuffer(320);
+    const det = makeDetection({ cx: 160, cy: 160, r: 120 });
+    const result = rectifyCode(buf, det, 5, 300);
+    expect(result.orientation).toBeDefined();
+    expect(result.orientation).toHaveProperty("angle");
+    expect(result.orientation).toHaveProperty("reflected");
+    expect(result.orientation).toHaveProperty("confidence");
+    expect(typeof result.orientation.angle).toBe("number");
+    expect(typeof result.orientation.reflected).toBe("boolean");
   });
 
   it("respects output size", () => {

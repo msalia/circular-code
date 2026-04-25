@@ -75445,7 +75445,7 @@ return a / b;`;
     return model2 !== null;
   }
   function runModelPrediction(mdl, input2) {
-    return mdl instanceof GraphModel ? mdl.predict(input2) : mdl.predict(input2);
+    return mdl.predict(input2);
   }
   function sigmoid4(x2) {
     return 1 / (1 + Math.exp(-x2));
@@ -75483,58 +75483,6 @@ return a / b;`;
     }
     return result;
   }
-  function parseMultiHeadOutput(prediction) {
-    if (prediction && typeof prediction === "object" && !Array.isArray(prediction) && !(prediction instanceof Tensor)) {
-      const dict = prediction;
-      if (dict["presence"] && dict["geometry"] && dict["corners"] && dict["orientation"] && dict["reflection"]) {
-        return {
-          presence: dict["presence"].dataSync(),
-          geometry: dict["geometry"].dataSync(),
-          corners: dict["corners"].dataSync(),
-          orientation: dict["orientation"].dataSync(),
-          reflection: dict["reflection"].dataSync()
-        };
-      }
-    }
-    if (Array.isArray(prediction) && prediction.length === 5) {
-      return {
-        presence: prediction[0].dataSync(),
-        geometry: prediction[1].dataSync(),
-        corners: prediction[2].dataSync(),
-        orientation: prediction[3].dataSync(),
-        reflection: prediction[4].dataSync()
-      };
-    }
-    return null;
-  }
-  function multiHeadToDetection(output, frameW, frameH, confThreshold = 0.5) {
-    const confidence = output.presence[0];
-    if (confidence < confThreshold) return null;
-    const cx = output.geometry[0] * frameW;
-    const cy = output.geometry[1] * frameH;
-    const r = output.geometry[2] * Math.max(frameW, frameH);
-    const corners = [];
-    for (let i = 0; i < 8; i += 2) {
-      corners.push({
-        x: output.corners[i] * frameW,
-        y: output.corners[i + 1] * frameH
-      });
-    }
-    const sinO = output.orientation[0];
-    const cosO = output.orientation[1];
-    const orientation = Math.atan2(sinO, cosO);
-    const reflected = output.reflection[0] > 0.5;
-    return {
-      cx,
-      cy,
-      r,
-      corners,
-      confidence,
-      angle: orientation,
-      orientation,
-      reflected
-    };
-  }
   function bufferToTensor(buf) {
     const { data, width, height } = buf;
     const floats = new Float32Array(width * height * 3);
@@ -75551,16 +75499,10 @@ return a / b;`;
     if (!model2) return null;
     let result = null;
     tidy(() => {
-      const resized = buf.width === MODEL_INPUT_SIZE && buf.height === MODEL_INPUT_SIZE ? bufferToTensor(buf) : bufferToTensor(buf).resizeBilinear([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
-      const pred = runModelPrediction(model2, resized);
-      const multiHead = parseMultiHeadOutput(pred);
-      if (multiHead) {
-        result = multiHeadToDetection(multiHead, buf.width, buf.height);
-        return;
-      }
-      const singleTensor = pred;
-      const data = singleTensor.dataSync();
-      const shape = singleTensor.shape;
+      const input2 = buf.width === MODEL_INPUT_SIZE && buf.height === MODEL_INPUT_SIZE ? bufferToTensor(buf) : bufferToTensor(buf).resizeBilinear([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
+      const pred = runModelPrediction(model2, input2);
+      const data = pred.dataSync();
+      const shape = pred.shape;
       result = parseDetections(data, shape, buf.width, buf.height);
     });
     return result;
@@ -75762,6 +75704,81 @@ return a / b;`;
     const normalizedContrast = Math.min(contrast / 80, 1);
     const overall = normalizedSharpness * 0.6 + normalizedContrast * 0.4;
     return { sharpness, contrast, overall };
+  }
+
+  // ../src/scan/orientationAnalyzer.ts
+  function analyzeOrientation(buf, rings, size, numSamples = 360) {
+    const { data, width, height } = buf;
+    const gray = toGrayscale(data, width * height);
+    const cx = width / 2;
+    const cy = height / 2;
+    const radius = getOrientationRingRadius(rings, size);
+    const arcs = getOrientationArcs();
+    const samples = new Float64Array(numSamples);
+    for (let i = 0; i < numSamples; i++) {
+      const angle = i / numSamples * Math.PI * 2;
+      const x2 = Math.round(cx + radius * Math.cos(angle));
+      const y = Math.round(cy + radius * Math.sin(angle));
+      if (x2 >= 0 && x2 < width && y >= 0 && y < height) {
+        samples[i] = gray[y * width + x2];
+      } else {
+        samples[i] = 128;
+      }
+    }
+    const median = computeMedian(samples);
+    const binaryPattern = new Uint8Array(numSamples);
+    for (let i = 0; i < numSamples; i++) {
+      binaryPattern[i] = samples[i] < median ? 1 : 0;
+    }
+    const expectedSpans = arcs.map((a) => a.end - a.start);
+    const totalExpected = expectedSpans.reduce((s, v) => s + v, 0);
+    const gapAngle = arcs.length > 1 ? arcs[1].start - arcs[0].end : Math.PI / 18;
+    let bestAngle = 0;
+    let bestScore = -1;
+    let bestReflected = false;
+    for (let reflected = 0; reflected <= 1; reflected++) {
+      const spans = reflected ? [...expectedSpans].reverse() : expectedSpans;
+      for (let offset = 0; offset < numSamples; offset++) {
+        let score = 0;
+        let cursor = offset;
+        for (let arcIdx = 0; arcIdx < spans.length; arcIdx++) {
+          const arcSamples = Math.round(spans[arcIdx] / (Math.PI * 2) * numSamples);
+          for (let j = 0; j < arcSamples; j++) {
+            const idx = (cursor + j) % numSamples;
+            if (binaryPattern[idx] === 1) score++;
+          }
+          cursor += arcSamples;
+          const gapSamples = Math.round(gapAngle / (Math.PI * 2) * numSamples);
+          for (let j = 0; j < gapSamples; j++) {
+            const idx = (cursor + j) % numSamples;
+            if (binaryPattern[idx] === 0) score++;
+          }
+          cursor += gapSamples;
+        }
+        const remainingSamples = numSamples - (cursor - offset);
+        if (remainingSamples > 0) {
+          for (let j = 0; j < remainingSamples; j++) {
+            const idx = (cursor + j) % numSamples;
+            if (binaryPattern[idx] === 0) score++;
+          }
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestAngle = offset / numSamples * Math.PI * 2;
+          bestReflected = reflected === 1;
+        }
+      }
+    }
+    return {
+      angle: bestAngle,
+      reflected: bestReflected,
+      confidence: bestScore / numSamples
+    };
+  }
+  function computeMedian(arr) {
+    const sorted = Array.from(arr).sort((a, b) => a - b);
+    const mid = sorted.length >> 1;
+    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   }
 
   // ../src/scan/perspective.ts
@@ -76022,7 +76039,7 @@ return a / b;`;
       codeSize = CODE_SIZE
     } = options;
     let captured;
-    if (source instanceof HTMLVideoElement) {
+    if (typeof HTMLVideoElement !== "undefined" && source instanceof HTMLVideoElement) {
       captured = captureFrameToBuffer(source, captureSize);
     } else if (typeof HTMLCanvasElement !== "undefined" && source instanceof HTMLCanvasElement) {
       captured = canvasToBuffer(source);
@@ -76034,11 +76051,17 @@ return a / b;`;
     const activeDetection = detected ? detection : { cx: captured.width / 2, cy: captured.height / 2, r: captured.width * 0.35, confidence: 0 };
     const corners = resolveCorners(activeDetection);
     let rectified = warpPerspective(captured, corners, codeSize);
-    if (activeDetection.reflected) {
+    const orientation = analyzeOrientation(rectified, rings, codeSize);
+    if (orientation.reflected) {
       rectified = flipBufferHorizontal(rectified);
     }
     const validation = validateCircularCode(rectified, rings, codeSize);
-    const frameScoreResult = scoreFrame(captured, activeDetection.cx, activeDetection.cy, activeDetection.r);
+    const frameScoreResult = scoreFrame(
+      captured,
+      activeDetection.cx,
+      activeDetection.cy,
+      activeDetection.r
+    );
     const bits = samplePolarGrid(
       rectified,
       codeSize / 2,
@@ -76063,6 +76086,7 @@ return a / b;`;
       decoded,
       error,
       detection,
+      orientation,
       corners,
       rectified,
       bits,
@@ -76223,6 +76247,16 @@ return a / b;`;
   }
   var lastScanTime = 0;
   var SCAN_INTERVAL_MS = 200;
+  function drawPipelineStep(canvasId, buf, overlay) {
+    const canvas = document.getElementById(canvasId);
+    const sz = 120;
+    canvas.width = sz;
+    canvas.height = sz;
+    const ctx = canvas.getContext("2d");
+    const srcCanvas = bufferToCanvas(buf);
+    ctx.drawImage(srcCanvas, 0, 0, buf.width, buf.height, 0, 0, sz, sz);
+    if (overlay) overlay(ctx, sz);
+  }
   function scanLoop() {
     if (!scanning || paused) return;
     const now2 = performance.now();
@@ -76235,7 +76269,8 @@ return a / b;`;
     const rings = parseInt(optRings.value);
     const segmentsPerRing = parseInt(optSegments.value);
     const eccBytes = parseInt(optEcc.value);
-    const result = scanFrame(scanVideo, { rings, segmentsPerRing, eccBytes });
+    const captured = captureFrameToBuffer(scanVideo, 320);
+    const result = scanFrame(captured, { rings, segmentsPerRing, eccBytes });
     const overlay = document.getElementById("scan-overlay");
     const videoW = scanVideo.videoWidth || scanVideo.clientWidth;
     const videoH = scanVideo.videoHeight || scanVideo.clientHeight;
@@ -76247,77 +76282,89 @@ return a / b;`;
     const guideX = (videoW - side) / 2;
     const guideY = (videoH - side) / 2;
     const scaleX = side / 320;
+    const det = result.detection;
     octx.strokeStyle = "#ffffff30";
     octx.lineWidth = 2;
     octx.strokeRect(guideX, guideY, side, side);
-    const det = result.detection;
     octx.strokeStyle = det.confidence > 0.9 ? "#00ff00" : det.confidence > 0.5 ? "#ffff00" : "#ff0000";
     octx.lineWidth = 3;
     octx.beginPath();
     octx.arc(guideX + det.cx * scaleX, guideY + det.cy * scaleX, det.r * scaleX, 0, Math.PI * 2);
     octx.stroke();
-    if (det.corners && det.corners.length === 4) {
-      octx.strokeStyle = "#00ffff";
-      octx.lineWidth = 2;
-      octx.beginPath();
-      octx.moveTo(guideX + det.corners[0].x * scaleX, guideY + det.corners[0].y * scaleX);
-      for (let i = 1; i < 4; i++) {
-        octx.lineTo(guideX + det.corners[i].x * scaleX, guideY + det.corners[i].y * scaleX);
-      }
-      octx.closePath();
-      octx.stroke();
-      for (const c of det.corners) {
-        octx.fillStyle = "#00ffff";
-        octx.beginPath();
-        octx.arc(guideX + c.x * scaleX, guideY + c.y * scaleX, 4, 0, Math.PI * 2);
-        octx.fill();
-      }
-    }
-    octx.fillStyle = det.confidence > 0.5 ? "#00ff00" : "#ff0000";
-    octx.font = "14px monospace";
-    const ang = det.angle != null ? ` ang:${(det.angle * 180 / Math.PI).toFixed(0)}` : "";
-    const ori = det.orientation != null ? ` ori:${(det.orientation * 180 / Math.PI).toFixed(0)}` : "";
-    const ref = det.reflected ? " REFLECTED" : "";
-    octx.fillText(
-      `conf:${(det.confidence * 100).toFixed(0)}% r:${det.r.toFixed(0)} (${det.cx.toFixed(0)},${det.cy.toFixed(0)})${ang}${ori}${ref}`,
-      8,
-      20
-    );
-    const debugCanvas = document.getElementById("debug-warp");
-    const codeSize = result.rectified.width;
-    if (debugCanvas.width !== codeSize) debugCanvas.width = codeSize;
-    if (debugCanvas.height !== codeSize) debugCanvas.height = codeSize;
-    const debugCtx = debugCanvas.getContext("2d", { willReadFrequently: true });
-    const rectifiedCanvas = bufferToCanvas(result.rectified);
-    debugCtx.drawImage(rectifiedCanvas, 0, 0);
-    let bitIdx = 0;
-    for (let r = 0; r < rings; r++) {
-      if (!isDataRing(r)) continue;
-      const segs = getSegmentsForRing(r, rings, segmentsPerRing);
-      const radius = getRingRadius(r, rings, codeSize);
-      for (let s = 0; s < segs; s++) {
-        const bit = result.bits[bitIdx++] ?? 0;
-        const angle = getSegmentAngle(s, segs);
-        debugCtx.fillStyle = bit ? "#00ff00" : "#ff000080";
-        debugCtx.beginPath();
-        debugCtx.arc(
-          codeSize / 2 + radius * Math.cos(angle),
-          codeSize / 2 + radius * Math.sin(angle),
-          2,
-          0,
-          Math.PI * 2
-        );
-        debugCtx.fill();
-      }
-    }
     const v = result.validation;
-    octx.fillStyle = v.valid ? "#00ff0080" : "#ff000040";
+    octx.fillStyle = det.confidence > 0.5 ? "#00ff00" : "#ff0000";
     octx.font = "12px monospace";
-    octx.fillText(
-      `valid:${v.valid ? "YES" : "no"} (${v.score.toFixed(2)}) dot:${v.centerDot ? "Y" : "n"} ring:${v.ringContrast ? "Y" : "n"} seg:${v.segmentPattern ? "Y" : "n"}`,
-      8,
-      videoH - 8
-    );
+    const ang = det.angle != null ? ` ang:${(det.angle * 180 / Math.PI).toFixed(0)}` : "";
+    const ori = result.orientation;
+    const ref = ori.reflected ? " REFL" : "";
+    octx.fillText(`${(det.confidence * 100).toFixed(0)}% r:${det.r.toFixed(0)}${ang} ori:${(ori.angle * 180 / Math.PI).toFixed(0)}${ref}`, 8, 20);
+    octx.fillStyle = v.valid ? "#00ff0080" : "#ff000040";
+    octx.fillText(`${v.valid ? "VALID" : "invalid"} (${v.score.toFixed(2)})`, 8, videoH - 8);
+    drawPipelineStep("dbg-capture", captured);
+    drawPipelineStep("dbg-detect", captured, (ctx, sz) => {
+      const s = sz / captured.width;
+      ctx.strokeStyle = det.confidence > 0.5 ? "#00ff00" : "#ff0000";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(det.cx * s, det.cy * s, det.r * s, 0, Math.PI * 2);
+      ctx.stroke();
+      if (result.corners.length === 4) {
+        ctx.strokeStyle = "#00ffff";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(result.corners[0].x * s, result.corners[0].y * s);
+        for (let i = 1; i < 4; i++) ctx.lineTo(result.corners[i].x * s, result.corners[i].y * s);
+        ctx.closePath();
+        ctx.stroke();
+      }
+    });
+    drawPipelineStep("dbg-warp", result.rectified);
+    const codeSize = result.rectified.width;
+    drawPipelineStep("dbg-sample", result.rectified, (ctx, sz) => {
+      const s = sz / codeSize;
+      let bitIdx = 0;
+      for (let r = 0; r < rings; r++) {
+        if (!isDataRing(r)) continue;
+        const segs = getSegmentsForRing(r, rings, segmentsPerRing);
+        const radius = getRingRadius(r, rings, codeSize);
+        for (let seg = 0; seg < segs; seg++) {
+          const bit = result.bits[bitIdx++] ?? 0;
+          const a = getSegmentAngle(seg, segs);
+          ctx.fillStyle = bit ? "#00ff00" : "#ff000080";
+          ctx.beginPath();
+          ctx.arc((codeSize / 2 + radius * Math.cos(a)) * s, (codeSize / 2 + radius * Math.sin(a)) * s, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    });
+    const resultCanvas = document.getElementById("dbg-result");
+    const rCtx = resultCanvas.getContext("2d");
+    resultCanvas.width = 120;
+    resultCanvas.height = 120;
+    rCtx.fillStyle = "#111";
+    rCtx.fillRect(0, 0, 120, 120);
+    rCtx.font = "bold 12px monospace";
+    rCtx.textAlign = "center";
+    if (result.decoded) {
+      rCtx.fillStyle = "#00ff00";
+      rCtx.fillText("DECODED", 60, 40);
+      rCtx.font = "10px monospace";
+      rCtx.fillStyle = "#ccc";
+      const text = result.decoded.length > 14 ? result.decoded.slice(0, 14) + "..." : result.decoded;
+      rCtx.fillText(text, 60, 60);
+    } else {
+      rCtx.fillStyle = "#ff4444";
+      rCtx.fillText("FAILED", 60, 40);
+      rCtx.font = "9px monospace";
+      rCtx.fillStyle = "#888";
+      const err = (result.error || "").slice(0, 18);
+      rCtx.fillText(err, 60, 60);
+    }
+    rCtx.font = "9px monospace";
+    rCtx.fillStyle = "#666";
+    rCtx.fillText(`dot:${v.centerDot ? "Y" : "n"} ring:${v.ringContrast ? "Y" : "n"} seg:${v.segmentPattern ? "Y" : "n"}`, 60, 80);
+    rCtx.fillText(`orient: ${(ori.angle * 180 / Math.PI).toFixed(0)} ${ori.reflected ? "REFL" : ""}`, 60, 95);
+    rCtx.fillText(`conf: ${(ori.confidence * 100).toFixed(0)}%`, 60, 110);
     if (result.decoded) {
       decodeCount++;
       scanResultEl.textContent = result.decoded;

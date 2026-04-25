@@ -113,3 +113,80 @@ describe("parseDetections (YOLO legacy)", () => {
     expect(result.angle).toBeUndefined();
   });
 });
+
+describe("parseDetections (YOLO-Pose)", () => {
+  function makePoseOutput(
+    cx: number,
+    cy: number,
+    w: number,
+    h: number,
+    confProb: number,
+    kps: [number, number][], // 4 corner keypoints
+    numCandidates = 2,
+    targetIdx = 0,
+  ): { data: Float32Array; shape: number[] } {
+    const channels = 5 + 4 * 3; // cx,cy,w,h,class + 4 keypoints * (x,y,conf)
+    const data = new Float32Array(channels * numCandidates);
+    data[0 * numCandidates + targetIdx] = cx;
+    data[1 * numCandidates + targetIdx] = cy;
+    data[2 * numCandidates + targetIdx] = w;
+    data[3 * numCandidates + targetIdx] = h;
+    data[4 * numCandidates + targetIdx] = toLogit(confProb);
+    for (let kp = 0; kp < 4; kp++) {
+      const base = 5 + kp * 3;
+      data[base * numCandidates + targetIdx] = kps[kp][0];
+      data[(base + 1) * numCandidates + targetIdx] = kps[kp][1];
+      data[(base + 2) * numCandidates + targetIdx] = 1.0; // confidence
+    }
+    return { data, shape: [1, channels, numCandidates] };
+  }
+
+  it("detects pose output format (17 channels)", () => {
+    const kps: [number, number][] = [[50, 50], [270, 50], [270, 270], [50, 270]];
+    const { data, shape } = makePoseOutput(160, 160, 220, 220, 0.9, kps);
+    const result = parseDetections(data, shape, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
+    expect(result).not.toBeNull();
+    expect(result!.corners).toBeDefined();
+    expect(result!.corners).toHaveLength(4);
+  });
+
+  it("extracts keypoint positions scaled to frame size", () => {
+    const kps: [number, number][] = [[80, 80], [240, 80], [240, 240], [80, 240]];
+    const { data, shape } = makePoseOutput(160, 160, 160, 160, 0.9, kps);
+    const result = parseDetections(data, shape, 640, 480)!;
+    expect(result.corners![0].x).toBeCloseTo(80 * (640 / MODEL_INPUT_SIZE));
+    expect(result.corners![0].y).toBeCloseTo(80 * (480 / MODEL_INPUT_SIZE));
+    expect(result.corners![2].x).toBeCloseTo(240 * (640 / MODEL_INPUT_SIZE));
+    expect(result.corners![2].y).toBeCloseTo(240 * (480 / MODEL_INPUT_SIZE));
+  });
+
+  it("returns 4 corners in order", () => {
+    const kps: [number, number][] = [[10, 20], [300, 30], [290, 280], [20, 290]];
+    const { data, shape } = makePoseOutput(160, 160, 280, 260, 0.85, kps);
+    const result = parseDetections(data, shape, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE)!;
+    expect(result.corners![0].x).toBeCloseTo(10);
+    expect(result.corners![0].y).toBeCloseTo(20);
+    expect(result.corners![3].x).toBeCloseTo(20);
+    expect(result.corners![3].y).toBeCloseTo(290);
+  });
+
+  it("does not set angle for pose output", () => {
+    const kps: [number, number][] = [[50, 50], [270, 50], [270, 270], [50, 270]];
+    const { data, shape } = makePoseOutput(160, 160, 220, 220, 0.9, kps);
+    const result = parseDetections(data, shape, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE)!;
+    expect(result.angle).toBeUndefined();
+  });
+
+  it("returns null for low confidence pose output", () => {
+    const kps: [number, number][] = [[50, 50], [270, 50], [270, 270], [50, 270]];
+    const { data, shape } = makePoseOutput(160, 160, 220, 220, 0.3, kps);
+    const result = parseDetections(data, shape, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE);
+    expect(result).toBeNull();
+  });
+
+  it("does not return corners for non-pose output", () => {
+    const { data, shape } = makeYoloOutput(160, 160, 100, 100, 0.9);
+    const result = parseDetections(data, shape, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE)!;
+    expect(result.corners).toBeUndefined();
+  });
+});

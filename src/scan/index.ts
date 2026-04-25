@@ -1,3 +1,4 @@
+import type { OrientationAnalysis } from "@/scan/orientationAnalyzer";
 import type { ValidationResult } from "@/scan/validator";
 import type {
   DetectionResult,
@@ -13,6 +14,7 @@ import { detectWithModel, isModelLoaded, loadModel } from "@/ml/detector";
 import { MultiFrameConsensus } from "@/scan/consensus";
 import { detectCircle } from "@/scan/detector";
 import { scoreFrame } from "@/scan/frameScorer";
+import { analyzeOrientation } from "@/scan/orientationAnalyzer";
 import { estimateCircleCorners, warpPerspective } from "@/scan/perspective";
 import { samplePolarGrid } from "@/scan/sampler";
 import { validateCircularCode } from "@/scan/validator";
@@ -30,12 +32,13 @@ export type ScanFrameOptions = {
   codeSize?: number;
 };
 
-/** Full result from scanning a single frame including detection, bits, and validation. */
+/** Full result from scanning a single frame including detection, orientation, bits, and validation. */
 export type ScanFrameResult = {
   detected: boolean;
   decoded: string | null;
   error: string | null;
   detection: DetectionResult;
+  orientation: OrientationAnalysis;
   corners: Point[];
   rectified: ImageBuffer;
   bits: number[];
@@ -52,7 +55,7 @@ export function detectCode(buf: ImageBuffer): DetectionResult {
   return detectCircle(buf);
 }
 
-/** Resolves four corner points from a detection, estimating from circle if needed. */
+/** Returns model-predicted corners or estimates them from detection geometry. */
 export function resolveCorners(detection: DetectionResult, padding = 1.15): Point[] {
   if (detection.corners && detection.corners.length === 4) {
     return detection.corners;
@@ -66,19 +69,20 @@ export function resolveCorners(detection: DetectionResult, padding = 1.15): Poin
   );
 }
 
-/** Flips an image buffer horizontally to correct for mirrored captures. */
+/** Flips an ImageBuffer horizontally. */
 export function flipHorizontal(buf: ImageBuffer): ImageBuffer {
   return flipBufferHorizontal(buf);
 }
 
-/** Result of perspective-correcting a detected code region. */
+/** Result of rectifying a detected code region. */
 export type RectifyResult = {
   image: ImageBuffer;
   corners: Point[];
   validation: ValidationResult;
+  orientation: OrientationAnalysis;
 };
 
-/** Perspective-corrects and validates a detected circular code region. */
+/** Warps, de-reflects, validates, and analyzes orientation of a detected code. */
 export function rectifyCode(
   frame: ImageBuffer,
   detection: DetectionResult,
@@ -88,16 +92,18 @@ export function rectifyCode(
   const corners = resolveCorners(detection);
   let rectified = warpPerspective(frame, corners, outputSize);
 
-  if (detection.reflected) {
+  const orientation = analyzeOrientation(rectified, rings, outputSize);
+
+  if (orientation.reflected) {
     rectified = flipBufferHorizontal(rectified);
   }
 
   const validation = validateCircularCode(rectified, rings, outputSize);
 
-  return { image: rectified, corners, validation };
+  return { image: rectified, corners, validation, orientation };
 }
 
-/** Captures, detects, rectifies, and decodes a circular code from a single frame. */
+/** Processes a single frame through the full scan pipeline: detect, rectify, sample, decode. */
 export function scanFrame(
   source: HTMLVideoElement | HTMLCanvasElement | ImageBuffer,
   options: ScanFrameOptions = {},
@@ -111,7 +117,7 @@ export function scanFrame(
   } = options;
 
   let captured: ImageBuffer;
-  if (source instanceof HTMLVideoElement) {
+  if (typeof HTMLVideoElement !== "undefined" && source instanceof HTMLVideoElement) {
     captured = captureFrameToBuffer(source, captureSize);
   } else if (typeof HTMLCanvasElement !== "undefined" && source instanceof HTMLCanvasElement) {
     captured = canvasToBuffer(source);
@@ -129,7 +135,9 @@ export function scanFrame(
   const corners = resolveCorners(activeDetection);
   let rectified = warpPerspective(captured, corners, codeSize);
 
-  if (activeDetection.reflected) {
+  const orientation = analyzeOrientation(rectified, rings, codeSize);
+
+  if (orientation.reflected) {
     rectified = flipBufferHorizontal(rectified);
   }
 
@@ -168,6 +176,7 @@ export function scanFrame(
     decoded,
     error,
     detection,
+    orientation,
     corners,
     rectified,
     bits,
@@ -176,7 +185,7 @@ export function scanFrame(
   };
 }
 
-/** Rectifies, samples, and decodes a circular code from a frame and detection. */
+/** Rectifies, validates, samples, and decodes a code from a frame. Throws if invalid. */
 export function sampleAndDecode(
   frame: ImageBuffer,
   detection: DetectionResult,
@@ -203,7 +212,7 @@ export function sampleAndDecode(
   return decode(bits, eccBytes);
 }
 
-/** Continuously scans video frames until a consensus decode is reached or timeout. */
+/** Scans video frames continuously until a code is decoded via multi-frame consensus. */
 export async function scanFromVideo(
   video: HTMLVideoElement,
   options: ScanOptions = {},
@@ -264,7 +273,7 @@ export async function scanFromVideo(
   });
 }
 
-/** Processes a single video frame and returns a scan result if quality is sufficient. */
+/** Processes a single video frame and returns a ScanResult if the code was decoded. */
 export function processFrame(
   video: HTMLVideoElement,
   options: {

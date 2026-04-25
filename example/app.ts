@@ -6,8 +6,8 @@ import { renderCanvas } from "@/render/canvasRenderer";
 import { getRingRadius, getSegmentsForRing, getSegmentAngle, isDataRing } from "@/core/layout";
 import { loadModel, isModelLoaded } from "@/ml/detector";
 import { scanFrame } from "@/scan";
-import { bufferToCanvas } from "@/utils/image";
-import type { EncodedCode } from "@/types";
+import { bufferToCanvas, captureFrameToBuffer } from "@/utils/image";
+import type { EncodedCode, ImageBuffer } from "@/types";
 
 let lastCode: EncodedCode | null = null;
 let lastSvg = "";
@@ -181,6 +181,21 @@ function resumeScan() {
 let lastScanTime = 0;
 const SCAN_INTERVAL_MS = 200;
 
+function drawPipelineStep(
+  canvasId: string,
+  buf: ImageBuffer,
+  overlay?: (ctx: CanvasRenderingContext2D, size: number) => void,
+) {
+  const canvas = document.getElementById(canvasId) as HTMLCanvasElement;
+  const sz = 120;
+  canvas.width = sz;
+  canvas.height = sz;
+  const ctx = canvas.getContext("2d")!;
+  const srcCanvas = bufferToCanvas(buf);
+  ctx.drawImage(srcCanvas, 0, 0, buf.width, buf.height, 0, 0, sz, sz);
+  if (overlay) overlay(ctx, sz);
+}
+
 function scanLoop() {
   if (!scanning || paused) return;
 
@@ -196,9 +211,10 @@ function scanLoop() {
   const segmentsPerRing = parseInt(optSegments.value);
   const eccBytes = parseInt(optEcc.value);
 
-  const result = scanFrame(scanVideo, { rings, segmentsPerRing, eccBytes });
+  const captured = captureFrameToBuffer(scanVideo, 320);
+  const result = scanFrame(captured, { rings, segmentsPerRing, eccBytes });
 
-  // --- Debug overlay ---
+  // --- Video overlay ---
   const overlay = document.getElementById("scan-overlay") as HTMLCanvasElement;
   const videoW = scanVideo.videoWidth || scanVideo.clientWidth;
   const videoH = scanVideo.videoHeight || scanVideo.clientHeight;
@@ -211,87 +227,98 @@ function scanLoop() {
   const guideX = (videoW - side) / 2;
   const guideY = (videoH - side) / 2;
   const scaleX = side / 320;
+  const det = result.detection;
 
   octx.strokeStyle = "#ffffff30";
   octx.lineWidth = 2;
   octx.strokeRect(guideX, guideY, side, side);
 
-  const det = result.detection;
-  octx.strokeStyle =
-    det.confidence > 0.9 ? "#00ff00" : det.confidence > 0.5 ? "#ffff00" : "#ff0000";
+  octx.strokeStyle = det.confidence > 0.9 ? "#00ff00" : det.confidence > 0.5 ? "#ffff00" : "#ff0000";
   octx.lineWidth = 3;
   octx.beginPath();
   octx.arc(guideX + det.cx * scaleX, guideY + det.cy * scaleX, det.r * scaleX, 0, Math.PI * 2);
   octx.stroke();
 
-  if (det.corners && det.corners.length === 4) {
-    octx.strokeStyle = "#00ffff";
-    octx.lineWidth = 2;
-    octx.beginPath();
-    octx.moveTo(guideX + det.corners[0].x * scaleX, guideY + det.corners[0].y * scaleX);
-    for (let i = 1; i < 4; i++) {
-      octx.lineTo(guideX + det.corners[i].x * scaleX, guideY + det.corners[i].y * scaleX);
-    }
-    octx.closePath();
-    octx.stroke();
-    for (const c of det.corners) {
-      octx.fillStyle = "#00ffff";
-      octx.beginPath();
-      octx.arc(guideX + c.x * scaleX, guideY + c.y * scaleX, 4, 0, Math.PI * 2);
-      octx.fill();
-    }
-  }
-
-  octx.fillStyle = det.confidence > 0.5 ? "#00ff00" : "#ff0000";
-  octx.font = "14px monospace";
-  const ang = det.angle != null ? ` ang:${((det.angle * 180) / Math.PI).toFixed(0)}` : "";
-  const ori =
-    det.orientation != null ? ` ori:${((det.orientation * 180) / Math.PI).toFixed(0)}` : "";
-  const ref = det.reflected ? " REFLECTED" : "";
-  octx.fillText(
-    `conf:${(det.confidence * 100).toFixed(0)}% r:${det.r.toFixed(0)} (${det.cx.toFixed(0)},${det.cy.toFixed(0)})${ang}${ori}${ref}`,
-    8,
-    20,
-  );
-
-  // Debug warp canvas
-  const debugCanvas = document.getElementById("debug-warp") as HTMLCanvasElement;
-  const codeSize = result.rectified.width;
-  if (debugCanvas.width !== codeSize) debugCanvas.width = codeSize;
-  if (debugCanvas.height !== codeSize) debugCanvas.height = codeSize;
-  const debugCtx = debugCanvas.getContext("2d", { willReadFrequently: true })!;
-  const rectifiedCanvas = bufferToCanvas(result.rectified);
-  debugCtx.drawImage(rectifiedCanvas, 0, 0);
-
-  let bitIdx = 0;
-  for (let r = 0; r < rings; r++) {
-    if (!isDataRing(r)) continue;
-    const segs = getSegmentsForRing(r, rings, segmentsPerRing);
-    const radius = getRingRadius(r, rings, codeSize);
-    for (let s = 0; s < segs; s++) {
-      const bit = result.bits[bitIdx++] ?? 0;
-      const angle = getSegmentAngle(s, segs);
-      debugCtx.fillStyle = bit ? "#00ff00" : "#ff000080";
-      debugCtx.beginPath();
-      debugCtx.arc(
-        codeSize / 2 + radius * Math.cos(angle),
-        codeSize / 2 + radius * Math.sin(angle),
-        2,
-        0,
-        Math.PI * 2,
-      );
-      debugCtx.fill();
-    }
-  }
-
   const v = result.validation;
-  octx.fillStyle = v.valid ? "#00ff0080" : "#ff000040";
+  octx.fillStyle = det.confidence > 0.5 ? "#00ff00" : "#ff0000";
   octx.font = "12px monospace";
-  octx.fillText(
-    `valid:${v.valid ? "YES" : "no"} (${v.score.toFixed(2)}) dot:${v.centerDot ? "Y" : "n"} ring:${v.ringContrast ? "Y" : "n"} seg:${v.segmentPattern ? "Y" : "n"}`,
-    8,
-    videoH - 8,
-  );
+  const ang = det.angle != null ? ` ang:${((det.angle * 180) / Math.PI).toFixed(0)}` : "";
+  const ori = result.orientation;
+  const ref = ori.reflected ? " REFL" : "";
+  octx.fillText(`${(det.confidence * 100).toFixed(0)}% r:${det.r.toFixed(0)}${ang} ori:${((ori.angle * 180) / Math.PI).toFixed(0)}${ref}`, 8, 20);
+  octx.fillStyle = v.valid ? "#00ff0080" : "#ff000040";
+  octx.fillText(`${v.valid ? "VALID" : "invalid"} (${v.score.toFixed(2)})`, 8, videoH - 8);
+
+  // --- Pipeline debug canvases ---
+  drawPipelineStep("dbg-capture", captured);
+
+  drawPipelineStep("dbg-detect", captured, (ctx, sz) => {
+    const s = sz / captured.width;
+    ctx.strokeStyle = det.confidence > 0.5 ? "#00ff00" : "#ff0000";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(det.cx * s, det.cy * s, det.r * s, 0, Math.PI * 2);
+    ctx.stroke();
+    if (result.corners.length === 4) {
+      ctx.strokeStyle = "#00ffff";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(result.corners[0].x * s, result.corners[0].y * s);
+      for (let i = 1; i < 4; i++) ctx.lineTo(result.corners[i].x * s, result.corners[i].y * s);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  });
+
+  drawPipelineStep("dbg-warp", result.rectified);
+
+  const codeSize = result.rectified.width;
+  drawPipelineStep("dbg-sample", result.rectified, (ctx, sz) => {
+    const s = sz / codeSize;
+    let bitIdx = 0;
+    for (let r = 0; r < rings; r++) {
+      if (!isDataRing(r)) continue;
+      const segs = getSegmentsForRing(r, rings, segmentsPerRing);
+      const radius = getRingRadius(r, rings, codeSize);
+      for (let seg = 0; seg < segs; seg++) {
+        const bit = result.bits[bitIdx++] ?? 0;
+        const a = getSegmentAngle(seg, segs);
+        ctx.fillStyle = bit ? "#00ff00" : "#ff000080";
+        ctx.beginPath();
+        ctx.arc((codeSize / 2 + radius * Math.cos(a)) * s, (codeSize / 2 + radius * Math.sin(a)) * s, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  });
+
+  const resultCanvas = document.getElementById("dbg-result") as HTMLCanvasElement;
+  const rCtx = resultCanvas.getContext("2d")!;
+  resultCanvas.width = 120;
+  resultCanvas.height = 120;
+  rCtx.fillStyle = "#111";
+  rCtx.fillRect(0, 0, 120, 120);
+  rCtx.font = "bold 12px monospace";
+  rCtx.textAlign = "center";
+  if (result.decoded) {
+    rCtx.fillStyle = "#00ff00";
+    rCtx.fillText("DECODED", 60, 40);
+    rCtx.font = "10px monospace";
+    rCtx.fillStyle = "#ccc";
+    const text = result.decoded.length > 14 ? result.decoded.slice(0, 14) + "..." : result.decoded;
+    rCtx.fillText(text, 60, 60);
+  } else {
+    rCtx.fillStyle = "#ff4444";
+    rCtx.fillText("FAILED", 60, 40);
+    rCtx.font = "9px monospace";
+    rCtx.fillStyle = "#888";
+    const err = (result.error || "").slice(0, 18);
+    rCtx.fillText(err, 60, 60);
+  }
+  rCtx.font = "9px monospace";
+  rCtx.fillStyle = "#666";
+  rCtx.fillText(`dot:${v.centerDot ? "Y" : "n"} ring:${v.ringContrast ? "Y" : "n"} seg:${v.segmentPattern ? "Y" : "n"}`, 60, 80);
+  rCtx.fillText(`orient: ${((ori.angle * 180) / Math.PI).toFixed(0)} ${ori.reflected ? "REFL" : ""}`, 60, 95);
+  rCtx.fillText(`conf: ${(ori.confidence * 100).toFixed(0)}%`, 60, 110);
 
   // --- Result handling ---
   if (result.decoded) {

@@ -2,12 +2,12 @@ import type { DetectionResult, ImageBuffer } from "@/types";
 
 import * as tf from "@tensorflow/tfjs";
 
-/** Expected input dimension for the ML detection model. */
+/** Input image size expected by the YOLO model. */
 export const MODEL_INPUT_SIZE = 320;
 
 let model: tf.GraphModel | tf.LayersModel | null = null;
 
-/** Loads the TensorFlow.js detection model from a file path or URL. */
+/** Loads a TF.js model from a URL or file path. */
 export async function loadModel(modelPath = "/models/circular_code/model.json"): Promise<void> {
   if (typeof window === "undefined" && !modelPath.startsWith("http")) {
     const { loadModelFromDisk } = await import("@/ml/nodeLoader");
@@ -17,7 +17,7 @@ export async function loadModel(modelPath = "/models/circular_code/model.json"):
   }
 }
 
-/** Loads a detection model directly from in-memory JSON and weight buffers. */
+/** Loads a model from in-memory buffers. */
 export async function loadModelFromFiles(
   modelJSON: object,
   weightSpecs: tf.io.WeightsManifestEntry[],
@@ -38,31 +38,29 @@ async function loadModelFromSource(
   }
 }
 
-/** Returns true if an ML detection model is currently loaded. */
+/** Returns true if a detection model has been loaded. */
 export function isModelLoaded(): boolean {
   return model !== null;
 }
 
-/** Returns the currently loaded TensorFlow model or null. */
+/** Returns the loaded model instance, or null. */
 export function getLoadedModel(): tf.GraphModel | tf.LayersModel | null {
   return model;
 }
 
-/** Runs inference on a model with the given input tensor. */
+/** Runs a model prediction on a tensor input. */
 export function runModelPrediction(
   mdl: tf.GraphModel | tf.LayersModel,
   input: tf.Tensor,
-): tf.Tensor | tf.Tensor[] | { [key: string]: tf.Tensor } {
-  return mdl instanceof tf.GraphModel
-    ? (mdl.predict(input) as tf.Tensor)
-    : ((mdl as tf.LayersModel).predict(input) as tf.Tensor | tf.Tensor[]);
+): tf.Tensor {
+  return mdl.predict(input) as tf.Tensor;
 }
 
 function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
 }
 
-/** Parses raw model output into the best detection result above a confidence threshold. */
+/** Parses YOLO output tensor into the best detection above a confidence threshold. */
 export function parseDetections(
   outputData: Float32Array | Int32Array | Uint8Array,
   outputShape: number[],
@@ -72,9 +70,15 @@ export function parseDetections(
 ): DetectionResult | null {
   const channels = outputShape[1];
   const numCandidates = outputShape[2];
-  const hasAngle = channels >= 6;
-  const confChannel = hasAngle ? 5 : 4;
   const threshold = confThreshold ?? 0.5;
+
+  // Determine format:
+  // Standard YOLO:     [1, 5, N] = cx, cy, w, h, class
+  // YOLO-OBB:          [1, 6, N] = cx, cy, w, h, angle, class
+  // YOLO-Pose (4 kps): [1, 17, N] = cx, cy, w, h, class, kp1x, kp1y, kp1c, ...kp4c
+  const hasPose = channels >= 17;
+  const hasAngle = !hasPose && channels >= 6;
+  const confChannel = hasAngle ? 5 : 4;
 
   let bestConf = threshold;
   let bestIdx = -1;
@@ -108,95 +112,19 @@ export function parseDetections(
     result.angle = outputData[4 * numCandidates + bestIdx];
   }
 
-  return result;
-}
-
-/** Raw output tensors from a multi-head detection model. */
-export type MultiHeadOutput = {
-  presence: Float32Array;
-  geometry: Float32Array;
-  corners: Float32Array;
-  orientation: Float32Array;
-  reflection: Float32Array;
-};
-
-function parseMultiHeadOutput(
-  prediction: tf.Tensor | tf.Tensor[] | { [key: string]: tf.Tensor },
-): MultiHeadOutput | null {
-  if (
-    prediction &&
-    typeof prediction === "object" &&
-    !Array.isArray(prediction) &&
-    !(prediction instanceof tf.Tensor)
-  ) {
-    const dict = prediction as { [key: string]: tf.Tensor };
-    if (
-      dict["presence"] &&
-      dict["geometry"] &&
-      dict["corners"] &&
-      dict["orientation"] &&
-      dict["reflection"]
-    ) {
-      return {
-        presence: dict["presence"].dataSync() as Float32Array,
-        geometry: dict["geometry"].dataSync() as Float32Array,
-        corners: dict["corners"].dataSync() as Float32Array,
-        orientation: dict["orientation"].dataSync() as Float32Array,
-        reflection: dict["reflection"].dataSync() as Float32Array,
-      };
+  if (hasPose) {
+    const corners = [];
+    for (let kp = 0; kp < 4; kp++) {
+      const kpBase = (5 + kp * 3) * numCandidates + bestIdx;
+      corners.push({
+        x: outputData[kpBase] * scaleX,
+        y: outputData[kpBase + numCandidates] * scaleY,
+      });
     }
+    result.corners = corners;
   }
 
-  if (Array.isArray(prediction) && prediction.length === 5) {
-    return {
-      presence: prediction[0].dataSync() as Float32Array,
-      geometry: prediction[1].dataSync() as Float32Array,
-      corners: prediction[2].dataSync() as Float32Array,
-      orientation: prediction[3].dataSync() as Float32Array,
-      reflection: prediction[4].dataSync() as Float32Array,
-    };
-  }
-
-  return null;
-}
-
-function multiHeadToDetection(
-  output: MultiHeadOutput,
-  frameW: number,
-  frameH: number,
-  confThreshold = 0.5,
-): DetectionResult | null {
-  const confidence = output.presence[0];
-  if (confidence < confThreshold) return null;
-
-  const cx = output.geometry[0] * frameW;
-  const cy = output.geometry[1] * frameH;
-  const r = output.geometry[2] * Math.max(frameW, frameH);
-
-  const corners = [];
-  for (let i = 0; i < 8; i += 2) {
-    corners.push({
-      x: output.corners[i] * frameW,
-      y: output.corners[i + 1] * frameH,
-    });
-  }
-
-  const sinO = output.orientation[0];
-  const cosO = output.orientation[1];
-  const orientation = Math.atan2(sinO, cosO);
-
-  const reflected = output.reflection[0] > 0.5;
-
-  return {
-    cx,
-    cy,
-    r,
-    corners,
-    confidence,
-    angle: orientation,
-    orientation,
-    reflected,
-  };
+  return result;
 }
 
 function bufferToTensor(buf: ImageBuffer): tf.Tensor4D {
@@ -212,29 +140,21 @@ function bufferToTensor(buf: ImageBuffer): tf.Tensor4D {
   return tf.tensor4d(floats, [1, height, width, 3]);
 }
 
-/** Runs the loaded ML model on an image buffer and returns a detection result. */
+/** Runs the loaded ML model on an ImageBuffer and returns a detection result. */
 export function detectWithModel(buf: ImageBuffer): DetectionResult | null {
   if (!model) return null;
 
   let result: DetectionResult | null = null;
 
   tf.tidy(() => {
-    const resized =
+    const input =
       buf.width === MODEL_INPUT_SIZE && buf.height === MODEL_INPUT_SIZE
         ? bufferToTensor(buf)
         : bufferToTensor(buf).resizeBilinear([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
 
-    const pred = runModelPrediction(model!, resized);
-
-    const multiHead = parseMultiHeadOutput(pred);
-    if (multiHead) {
-      result = multiHeadToDetection(multiHead, buf.width, buf.height);
-      return;
-    }
-
-    const singleTensor = pred as tf.Tensor;
-    const data = singleTensor.dataSync();
-    const shape = singleTensor.shape;
+    const pred = runModelPrediction(model!, input);
+    const data = pred.dataSync();
+    const shape = pred.shape;
     result = parseDetections(data, shape as number[], buf.width, buf.height);
   });
 

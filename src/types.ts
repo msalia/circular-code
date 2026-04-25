@@ -33,8 +33,6 @@ export type DetectionResult = {
   corners?: Point[];
   confidence: number;
   angle?: number;
-  orientation?: number;
-  reflected?: boolean;
 };
 
 /** Quality metrics for a captured video frame. */
