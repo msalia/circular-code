@@ -2,6 +2,7 @@ import type { ImageBuffer } from "@/types";
 
 import { getRingRadius, getSegmentAngle, getSegmentsForRing, isDataRing } from "@/core/layout";
 
+/** Samples bits from a rectified circular code image using polar coordinates. */
 export function samplePolarGrid(
   frame: ImageBuffer,
   cx: number,

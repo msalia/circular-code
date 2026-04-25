@@ -1,5 +1,6 @@
 import { EXP_TABLE, generatorPoly, gfDiv, gfInverse, gfMul } from "@/ecc/galoisField";
 
+/** Encodes data with Reed-Solomon error correction parity bytes. */
 export function rsEncode(data: Uint8Array, eccBytes = 16): Uint8Array {
   const gen = generatorPoly(eccBytes);
   const output = new Uint8Array(data.length + eccBytes);
@@ -23,6 +24,7 @@ export function rsEncode(data: Uint8Array, eccBytes = 16): Uint8Array {
   return output;
 }
 
+/** Decodes and corrects errors in a Reed-Solomon encoded message. */
 export function rsDecode(received: Uint8Array, eccBytes = 16): Uint8Array {
   const n = received.length;
   const msg = Array.from(received);

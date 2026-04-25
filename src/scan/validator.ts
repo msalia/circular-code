@@ -3,6 +3,7 @@ import type { ImageBuffer } from "@/types";
 import { getRingRadius, getRingWidth } from "@/core/layout";
 import { toGrayscale } from "@/utils/image";
 
+/** Result of validating whether an image contains a circular code. */
 export type ValidationResult = {
   valid: boolean;
   centerDot: boolean;
@@ -11,6 +12,7 @@ export type ValidationResult = {
   score: number;
 };
 
+/** Validates whether a rectified image looks like a circular code. */
 export function validateCircularCode(
   buf: ImageBuffer,
   rings: number,

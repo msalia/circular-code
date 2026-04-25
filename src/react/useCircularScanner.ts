@@ -3,9 +3,10 @@ import type { ConsensusResult, ScanOptions } from "@/types";
 import { useEffect, useRef, useState } from "react";
 
 import { isModelLoaded, loadModel } from "@/ml/detector";
-import { processFrame } from "@/scan";
+import { scanFrame } from "@/scan";
 import { MultiFrameConsensus } from "@/scan/consensus";
 
+/** React hook for scanning circular codes from a camera feed. */
 export function useCircularScanner(options: ScanOptions = {}) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [result, setResult] = useState<ConsensusResult | null>(null);
@@ -17,6 +18,7 @@ export function useCircularScanner(options: ScanOptions = {}) {
       options.consensusSize ?? 7,
       options.consensusRequired ?? 3,
     );
+    const minFrameScore = options.minFrameScore ?? 0.3;
 
     async function start() {
       if (options.modelUrl && !isModelLoaded()) {
@@ -42,15 +44,18 @@ export function useCircularScanner(options: ScanOptions = {}) {
       if (!running || !videoRef.current) return;
 
       try {
-        const scanResult = processFrame(videoRef.current, {
+        const frame = scanFrame(videoRef.current, {
           rings: options.rings,
           segmentsPerRing: options.segmentsPerRing,
           eccBytes: options.eccBytes,
-          minFrameScore: options.minFrameScore,
         });
 
-        if (scanResult) {
-          const consensusResult = consensus.push(scanResult);
+        if (frame.decoded && frame.frameScore.overall >= minFrameScore) {
+          const consensusResult = consensus.push({
+            data: frame.decoded,
+            confidence: frame.detection.confidence,
+            frameScore: frame.frameScore,
+          });
           if (consensusResult) {
             setResult(consensusResult);
             setScanning(false);

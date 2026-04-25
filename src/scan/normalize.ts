@@ -1,5 +1,6 @@
 import type { ImageBuffer } from "@/types";
 
+/** Resizes an image buffer to a square of the target size using nearest-neighbor sampling. */
 export function normalizeFrame(frame: ImageBuffer, size = 320): ImageBuffer {
   if (frame.width === size && frame.height === size) return frame;
 

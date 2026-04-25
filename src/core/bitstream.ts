@@ -1,3 +1,4 @@
+/** Converts an iterable of bytes into an array of individual bits. */
 export function bytesToBits(bytes: Iterable<number>): number[] {
   const bits: number[] = [];
   for (const byte of bytes) {
@@ -8,6 +9,7 @@ export function bytesToBits(bytes: Iterable<number>): number[] {
   return bits;
 }
 
+/** Converts an array of bits back into a Uint8Array of bytes. */
 export function bitsToBytes(bits: number[]): Uint8Array {
   const bytes = new Uint8Array(Math.ceil(bits.length / 8));
   for (let byteIndex = 0; byteIndex < bytes.length; byteIndex++) {

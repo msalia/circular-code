@@ -2,6 +2,7 @@ import type { FrameScore, ImageBuffer } from "@/types";
 
 import { toGrayscale } from "@/utils/image";
 
+/** Scores frame quality by measuring sharpness and contrast around the code region. */
 export function scoreFrame(buf: ImageBuffer, cx: number, cy: number, r: number): FrameScore {
   const { data, width, height } = buf;
 

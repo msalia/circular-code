@@ -5,6 +5,7 @@ type CachedCanvas = {
 
 const cache = new Map<string, CachedCanvas>();
 
+/** Returns a cached canvas and context of the given size, creating one if needed. */
 export function getOrCreateCanvas(
   size: number,
   key = "default",

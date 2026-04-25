@@ -2,10 +2,12 @@ import type { DetectionResult, ImageBuffer } from "@/types";
 
 import * as tf from "@tensorflow/tfjs";
 
+/** Expected input dimension for the ML detection model. */
 export const MODEL_INPUT_SIZE = 320;
 
 let model: tf.GraphModel | tf.LayersModel | null = null;
 
+/** Loads the TensorFlow.js detection model from a file path or URL. */
 export async function loadModel(modelPath = "/models/circular_code/model.json"): Promise<void> {
   if (typeof window === "undefined" && !modelPath.startsWith("http")) {
     const { loadModelFromDisk } = await import("@/ml/nodeLoader");
@@ -15,6 +17,7 @@ export async function loadModel(modelPath = "/models/circular_code/model.json"):
   }
 }
 
+/** Loads a detection model directly from in-memory JSON and weight buffers. */
 export async function loadModelFromFiles(
   modelJSON: object,
   weightSpecs: tf.io.WeightsManifestEntry[],
@@ -35,14 +38,17 @@ async function loadModelFromSource(
   }
 }
 
+/** Returns true if an ML detection model is currently loaded. */
 export function isModelLoaded(): boolean {
   return model !== null;
 }
 
+/** Returns the currently loaded TensorFlow model or null. */
 export function getLoadedModel(): tf.GraphModel | tf.LayersModel | null {
   return model;
 }
 
+/** Runs inference on a model with the given input tensor. */
 export function runModelPrediction(
   mdl: tf.GraphModel | tf.LayersModel,
   input: tf.Tensor,
@@ -56,6 +62,7 @@ function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
 }
 
+/** Parses raw model output into the best detection result above a confidence threshold. */
 export function parseDetections(
   outputData: Float32Array | Int32Array | Uint8Array,
   outputShape: number[],
@@ -104,6 +111,7 @@ export function parseDetections(
   return result;
 }
 
+/** Raw output tensors from a multi-head detection model. */
 export type MultiHeadOutput = {
   presence: Float32Array;
   geometry: Float32Array;
@@ -204,6 +212,7 @@ function bufferToTensor(buf: ImageBuffer): tf.Tensor4D {
   return tf.tensor4d(floats, [1, height, width, 3]);
 }
 
+/** Runs the loaded ML model on an image buffer and returns a detection result. */
 export function detectWithModel(buf: ImageBuffer): DetectionResult | null {
   if (!model) return null;
 

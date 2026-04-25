@@ -2,6 +2,7 @@ import type { EncodedCode } from "@/types";
 
 import { renderSVG } from "@/render/svgRenderer";
 
+/** Renders an encoded circular code onto an HTML canvas element. */
 export function renderCanvas(code: EncodedCode, size = 300): HTMLCanvasElement {
   const svg = renderSVG(code, { size, primary: "#000000", secondary: "#d0d0d0" });
 

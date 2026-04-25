@@ -1,5 +1,6 @@
 import type { ImageBuffer, Point } from "@/types";
 
+/** Computes a 3x3 homography matrix from four source-destination point pairs. */
 export function solveHomography(src: Point[], dst: Point[]): number[] {
   if (src.length !== 4 || dst.length !== 4) {
     throw new Error("Homography requires exactly 4 point correspondences");
@@ -56,6 +57,7 @@ function solveLinearSystem(A: number[][], b: number[]): number[] {
   return aug.map((row) => row[n]);
 }
 
+/** Computes the inverse of a 3x3 homography matrix. */
 export function invertHomography(H: number[]): number[] {
   const [a, b, c, d, e, f, g, h, i] = H;
   const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
@@ -77,6 +79,7 @@ export function invertHomography(H: number[]): number[] {
   return inv;
 }
 
+/** Warps a source image region into a square output using perspective transform. */
 export function warpPerspective(
   src: ImageBuffer,
   srcCorners: Point[],
@@ -150,6 +153,7 @@ export function warpPerspective(
   return { data: out, width: outputSize, height: outputSize };
 }
 
+/** Estimates four bounding-box corners from a circle center, radius, and angle. */
 export function estimateCircleCorners(
   cx: number,
   cy: number,

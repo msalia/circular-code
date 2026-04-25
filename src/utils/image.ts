@@ -2,10 +2,12 @@ import type { ImageBuffer } from "@/types";
 
 import { getOrCreateCanvas } from "@/utils/canvas";
 
+/** Creates an empty RGBA image buffer of the given dimensions. */
 export function createBuffer(width: number, height: number): ImageBuffer {
   return { data: new Uint8ClampedArray(width * height * 4), width, height };
 }
 
+/** Extracts pixel data from a canvas element into an ImageBuffer. */
 export function canvasToBuffer(canvas: HTMLCanvasElement): ImageBuffer {
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("Unable to get canvas context");
@@ -13,6 +15,7 @@ export function canvasToBuffer(canvas: HTMLCanvasElement): ImageBuffer {
   return { data: imageData.data, width: canvas.width, height: canvas.height };
 }
 
+/** Draws an ImageBuffer onto a canvas and returns the canvas element. */
 export function bufferToCanvas(buf: ImageBuffer): HTMLCanvasElement {
   const { canvas, ctx } = getOrCreateCanvas(buf.width, "bufferToCanvas");
   canvas.height = buf.height;
@@ -22,6 +25,7 @@ export function bufferToCanvas(buf: ImageBuffer): HTMLCanvasElement {
   return canvas;
 }
 
+/** Captures a square center-cropped frame from a video element onto a canvas. */
 export function captureFrame(video: HTMLVideoElement, targetSize = 320): HTMLCanvasElement {
   const { canvas, ctx } = getOrCreateCanvas(targetSize, "captureFrame", {
     willReadFrequently: true,
@@ -36,11 +40,13 @@ export function captureFrame(video: HTMLVideoElement, targetSize = 320): HTMLCan
   return canvas;
 }
 
+/** Captures a video frame and returns it as an ImageBuffer. */
 export function captureFrameToBuffer(video: HTMLVideoElement, targetSize = 320): ImageBuffer {
   const canvas = captureFrame(video, targetSize);
   return canvasToBuffer(canvas);
 }
 
+/** Converts RGBA pixel data to a single-channel grayscale array. */
 export function toGrayscale(data: Uint8ClampedArray, pixelCount: number): Uint8Array {
   const gray = new Uint8Array(pixelCount);
   for (let i = 0; i < pixelCount; i++) {
@@ -50,6 +56,7 @@ export function toGrayscale(data: Uint8ClampedArray, pixelCount: number): Uint8A
   return gray;
 }
 
+/** Flips an image buffer horizontally (mirrors left-to-right). */
 export function flipBufferHorizontal(buf: ImageBuffer): ImageBuffer {
   const { width, height, data } = buf;
   const out = new Uint8ClampedArray(data.length);
@@ -66,6 +73,7 @@ export function flipBufferHorizontal(buf: ImageBuffer): ImageBuffer {
   return { data: out, width, height };
 }
 
+/** Returns the average RGB brightness of a pixel, or 128 if out of bounds. */
 export function getPixelBrightness(buf: ImageBuffer, x: number, y: number): number {
   if (x < 0 || x >= buf.width || y < 0 || y >= buf.height) return 128;
   const idx = (y * buf.width + x) * 4;

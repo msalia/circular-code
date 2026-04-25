@@ -1,5 +1,6 @@
 import type { ConsensusResult, ScanResult } from "@/types";
 
+/** Accumulates scan results across frames and returns a result when consensus is reached. */
 export class MultiFrameConsensus {
   private buffer: ScanResult[] = [];
   private readonly bufferSize: number;
@@ -10,6 +11,7 @@ export class MultiFrameConsensus {
     this.requiredAgreement = requiredAgreement;
   }
 
+  /** Adds a scan result and returns consensus if agreement threshold is met. */
   push(result: ScanResult): ConsensusResult | null {
     this.buffer.push(result);
     if (this.buffer.length > this.bufferSize) {
@@ -19,6 +21,7 @@ export class MultiFrameConsensus {
     return this.evaluate();
   }
 
+  /** Checks the current buffer for consensus without adding a new result. */
   evaluate(): ConsensusResult | null {
     const counts = new Map<string, { count: number; totalScore: number }>();
 
@@ -52,10 +55,12 @@ export class MultiFrameConsensus {
     return null;
   }
 
+  /** Clears all buffered scan results. */
   reset(): void {
     this.buffer = [];
   }
 
+  /** Returns the number of results currently in the buffer. */
   get size(): number {
     return this.buffer.length;
   }

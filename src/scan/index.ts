@@ -21,6 +21,7 @@ import { canvasToBuffer, captureFrameToBuffer, flipBufferHorizontal } from "@/ut
 const CAPTURE_SIZE = 320;
 const CODE_SIZE = 300;
 
+/** Options for processing a single scan frame. */
 export type ScanFrameOptions = {
   rings?: number;
   segmentsPerRing?: number;
@@ -29,6 +30,7 @@ export type ScanFrameOptions = {
   codeSize?: number;
 };
 
+/** Full result from scanning a single frame including detection, bits, and validation. */
 export type ScanFrameResult = {
   detected: boolean;
   decoded: string | null;
@@ -41,6 +43,7 @@ export type ScanFrameResult = {
   frameScore: FrameScore;
 };
 
+/** Detects a circular code in an image buffer using ML or Hough fallback. */
 export function detectCode(buf: ImageBuffer): DetectionResult {
   if (isModelLoaded()) {
     const mlResult = detectWithModel(buf);
@@ -49,6 +52,7 @@ export function detectCode(buf: ImageBuffer): DetectionResult {
   return detectCircle(buf);
 }
 
+/** Resolves four corner points from a detection, estimating from circle if needed. */
 export function resolveCorners(detection: DetectionResult, padding = 1.15): Point[] {
   if (detection.corners && detection.corners.length === 4) {
     return detection.corners;
@@ -62,16 +66,19 @@ export function resolveCorners(detection: DetectionResult, padding = 1.15): Poin
   );
 }
 
+/** Flips an image buffer horizontally to correct for mirrored captures. */
 export function flipHorizontal(buf: ImageBuffer): ImageBuffer {
   return flipBufferHorizontal(buf);
 }
 
+/** Result of perspective-correcting a detected code region. */
 export type RectifyResult = {
   image: ImageBuffer;
   corners: Point[];
   validation: ValidationResult;
 };
 
+/** Perspective-corrects and validates a detected circular code region. */
 export function rectifyCode(
   frame: ImageBuffer,
   detection: DetectionResult,
@@ -90,6 +97,7 @@ export function rectifyCode(
   return { image: rectified, corners, validation };
 }
 
+/** Captures, detects, rectifies, and decodes a circular code from a single frame. */
 export function scanFrame(
   source: HTMLVideoElement | HTMLCanvasElement | ImageBuffer,
   options: ScanFrameOptions = {},
@@ -168,6 +176,7 @@ export function scanFrame(
   };
 }
 
+/** Rectifies, samples, and decodes a circular code from a frame and detection. */
 export function sampleAndDecode(
   frame: ImageBuffer,
   detection: DetectionResult,
@@ -194,6 +203,7 @@ export function sampleAndDecode(
   return decode(bits, eccBytes);
 }
 
+/** Continuously scans video frames until a consensus decode is reached or timeout. */
 export async function scanFromVideo(
   video: HTMLVideoElement,
   options: ScanOptions = {},
@@ -254,6 +264,7 @@ export async function scanFromVideo(
   });
 }
 
+/** Processes a single video frame and returns a scan result if quality is sufficient. */
 export function processFrame(
   video: HTMLVideoElement,
   options: {

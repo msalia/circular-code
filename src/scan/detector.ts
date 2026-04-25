@@ -11,6 +11,7 @@ for (let t = 0; t < HOUGH_ANGLES; t++) {
   sinTable[t] = Math.sin(angle);
 }
 
+/** Detects a circle in an image using Sobel edge detection and Hough transform. */
 export function detectCircle(buf: ImageBuffer): DetectionResult {
   const { data, width, height } = buf;
   const gray = toGrayscale(data, width * height);

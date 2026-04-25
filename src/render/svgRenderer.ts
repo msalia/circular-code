@@ -18,12 +18,14 @@ const STROKE_WIDTH_RATIO = 0.5;
 const CENTER_RADIUS_RATIO = 0.7;
 const SECONDARY_SEPARATION = 1;
 
+/** Options for customizing SVG rendering of a circular code. */
 export type SVGRenderOptions = {
   size?: number;
   primary?: string;
   secondary?: string;
 };
 
+/** Renders an encoded circular code as an SVG string. */
 export function renderSVG(code: EncodedCode, opts: SVGRenderOptions | number = {}): string {
   const normalized = typeof opts === "number" ? { size: opts } : opts;
   const {
