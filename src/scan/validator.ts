@@ -1,3 +1,5 @@
+import type { ImageBuffer } from "@/types";
+
 import { getRingRadius, getRingWidth } from "@/core/layout";
 import { toGrayscale } from "@/utils/image";
 
@@ -10,16 +12,12 @@ export type ValidationResult = {
 };
 
 export function validateCircularCode(
-  canvas: HTMLCanvasElement,
+  buf: ImageBuffer,
   rings: number,
   size: number,
   threshold = 0.5,
 ): ValidationResult {
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return { valid: false, centerDot: false, ringContrast: false, segmentPattern: false, score: 0 };
-
-  const { width, height } = canvas;
-  const data = ctx.getImageData(0, 0, width, height).data;
+  const { data, width, height } = buf;
   const gray = toGrayscale(data, width * height);
   const cx = width / 2;
   const cy = height / 2;
@@ -100,7 +98,7 @@ function checkRingContrast(
     let prevBright = 128;
     let transitionsOnRay = 0;
 
-    for (let r = 0; r < rings + 2; r++) {
+    for (let r = 0; r < rings + 3; r++) {
       const radius = (r + 0.5) * ringWidth;
       const x = cx + radius * Math.cos(angle);
       const y = cy + radius * Math.sin(angle);

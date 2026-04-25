@@ -15,6 +15,12 @@ export type Point = {
   y: number;
 };
 
+export type ImageBuffer = {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+};
+
 export type DetectionResult = {
   cx: number;
   cy: number;

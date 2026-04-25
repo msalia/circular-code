@@ -15876,228 +15876,6 @@ Manifest JSON has weights with names: ${allManifestWeightNames.join(", ")}.`);
     }
   });
 
-  // ../node_modules/@tensorflow/tfjs-core/dist/ops/browser.js
-  var browser_exports = {};
-  __export(browser_exports, {
-    draw: () => draw,
-    fromPixels: () => fromPixels,
-    fromPixelsAsync: () => fromPixelsAsync,
-    toPixels: () => toPixels
-  });
-  function fromPixels_(pixels, numChannels = 3) {
-    if (numChannels > 4) {
-      throw new Error("Cannot construct Tensor with more than 4 channels from pixels.");
-    }
-    if (pixels == null) {
-      throw new Error("pixels passed to tf.browser.fromPixels() can not be null");
-    }
-    let isPixelData2 = false;
-    let isImageData = false;
-    let isVideo = false;
-    let isImage = false;
-    let isCanvasLike = false;
-    let isImageBitmap = false;
-    if (pixels.data instanceof Uint8Array) {
-      isPixelData2 = true;
-    } else if (typeof ImageData !== "undefined" && pixels instanceof ImageData) {
-      isImageData = true;
-    } else if (typeof HTMLVideoElement !== "undefined" && pixels instanceof HTMLVideoElement) {
-      isVideo = true;
-    } else if (typeof HTMLImageElement !== "undefined" && pixels instanceof HTMLImageElement) {
-      isImage = true;
-    } else if (pixels.getContext != null) {
-      isCanvasLike = true;
-    } else if (typeof ImageBitmap !== "undefined" && pixels instanceof ImageBitmap) {
-      isImageBitmap = true;
-    } else {
-      throw new Error(`pixels passed to tf.browser.fromPixels() must be either an HTMLVideoElement, HTMLImageElement, HTMLCanvasElement, ImageData in browser, or OffscreenCanvas, ImageData in webworker or {data: Uint32Array, width: number, height: number}, but was ${pixels.constructor.name}`);
-    }
-    const kernel = getKernel(FromPixels, ENGINE.backendName);
-    if (kernel != null) {
-      const inputs = { pixels };
-      const attrs = { numChannels };
-      return ENGINE.runKernel(FromPixels, inputs, attrs);
-    }
-    const [width, height] = isVideo ? [
-      pixels.videoWidth,
-      pixels.videoHeight
-    ] : [pixels.width, pixels.height];
-    let vals;
-    if (isCanvasLike) {
-      vals = // tslint:disable-next-line:no-any
-      pixels.getContext("2d").getImageData(0, 0, width, height).data;
-    } else if (isImageData || isPixelData2) {
-      vals = pixels.data;
-    } else if (isImage || isVideo || isImageBitmap) {
-      if (fromPixels2DContext == null) {
-        if (typeof document === "undefined") {
-          if (typeof OffscreenCanvas !== "undefined" && typeof OffscreenCanvasRenderingContext2D !== "undefined") {
-            fromPixels2DContext = new OffscreenCanvas(1, 1).getContext("2d");
-          } else {
-            throw new Error("Cannot parse input in current context. Reason: OffscreenCanvas Context2D rendering is not supported.");
-          }
-        } else {
-          fromPixels2DContext = document.createElement("canvas").getContext("2d", { willReadFrequently: true });
-        }
-      }
-      fromPixels2DContext.canvas.width = width;
-      fromPixels2DContext.canvas.height = height;
-      fromPixels2DContext.drawImage(pixels, 0, 0, width, height);
-      vals = fromPixels2DContext.getImageData(0, 0, width, height).data;
-    }
-    let values;
-    if (numChannels === 4) {
-      values = new Int32Array(vals);
-    } else {
-      const numPixels = width * height;
-      values = new Int32Array(numPixels * numChannels);
-      for (let i = 0; i < numPixels; i++) {
-        for (let channel = 0; channel < numChannels; ++channel) {
-          values[i * numChannels + channel] = vals[i * 4 + channel];
-        }
-      }
-    }
-    const outShape = [height, width, numChannels];
-    return tensor3d(values, outShape, "int32");
-  }
-  function isPixelData(pixels) {
-    return pixels != null && pixels.data instanceof Uint8Array;
-  }
-  function isImageBitmapFullySupported() {
-    return typeof window !== "undefined" && typeof ImageBitmap !== "undefined" && window.hasOwnProperty("createImageBitmap");
-  }
-  function isNonEmptyPixels(pixels) {
-    return pixels != null && pixels.width !== 0 && pixels.height !== 0;
-  }
-  function canWrapPixelsToImageBitmap(pixels) {
-    return isImageBitmapFullySupported() && !(pixels instanceof ImageBitmap) && isNonEmptyPixels(pixels) && !isPixelData(pixels);
-  }
-  async function fromPixelsAsync(pixels, numChannels = 3) {
-    let inputs = null;
-    if (env().getBool("WRAP_TO_IMAGEBITMAP") && canWrapPixelsToImageBitmap(pixels)) {
-      let imageBitmap;
-      try {
-        imageBitmap = await createImageBitmap(pixels, { premultiplyAlpha: "none" });
-      } catch (e) {
-        imageBitmap = null;
-      }
-      if (imageBitmap != null && imageBitmap.width === pixels.width && imageBitmap.height === pixels.height) {
-        inputs = imageBitmap;
-      } else {
-        inputs = pixels;
-      }
-    } else {
-      inputs = pixels;
-    }
-    return fromPixels_(inputs, numChannels);
-  }
-  function validateImgTensor(img) {
-    if (img.rank !== 2 && img.rank !== 3) {
-      throw new Error(`toPixels only supports rank 2 or 3 tensors, got rank ${img.rank}.`);
-    }
-    const depth = img.rank === 2 ? 1 : img.shape[2];
-    if (depth > 4 || depth === 2) {
-      throw new Error(`toPixels only supports depth of size 1, 3 or 4 but got ${depth}`);
-    }
-    if (img.dtype !== "float32" && img.dtype !== "int32") {
-      throw new Error(`Unsupported type for toPixels: ${img.dtype}. Please use float32 or int32 tensors.`);
-    }
-  }
-  function validateImageOptions(imageOptions) {
-    const alpha = (imageOptions === null || imageOptions === void 0 ? void 0 : imageOptions.alpha) || 1;
-    if (alpha > 1 || alpha < 0) {
-      throw new Error(`Alpha value ${alpha} is suppoed to be in range [0 - 1].`);
-    }
-  }
-  async function toPixels(img, canvas) {
-    let $img = convertToTensor(img, "img", "toPixels");
-    if (!(img instanceof Tensor)) {
-      const originalImgTensor = $img;
-      $img = cast(originalImgTensor, "int32");
-      originalImgTensor.dispose();
-    }
-    validateImgTensor($img);
-    const [height, width] = $img.shape.slice(0, 2);
-    const depth = $img.rank === 2 ? 1 : $img.shape[2];
-    const data = await $img.data();
-    const multiplier = $img.dtype === "float32" ? 255 : 1;
-    const bytes = new Uint8ClampedArray(width * height * 4);
-    for (let i = 0; i < height * width; ++i) {
-      const rgba = [0, 0, 0, 255];
-      for (let d = 0; d < depth; d++) {
-        const value = data[i * depth + d];
-        if ($img.dtype === "float32") {
-          if (value < 0 || value > 1) {
-            throw new Error(`Tensor values for a float32 Tensor must be in the range [0 - 1] but encountered ${value}.`);
-          }
-        } else if ($img.dtype === "int32") {
-          if (value < 0 || value > 255) {
-            throw new Error(`Tensor values for a int32 Tensor must be in the range [0 - 255] but encountered ${value}.`);
-          }
-        }
-        if (depth === 1) {
-          rgba[0] = value * multiplier;
-          rgba[1] = value * multiplier;
-          rgba[2] = value * multiplier;
-        } else {
-          rgba[d] = value * multiplier;
-        }
-      }
-      const j = i * 4;
-      bytes[j + 0] = Math.round(rgba[0]);
-      bytes[j + 1] = Math.round(rgba[1]);
-      bytes[j + 2] = Math.round(rgba[2]);
-      bytes[j + 3] = Math.round(rgba[3]);
-    }
-    if (canvas != null) {
-      if (!hasToPixelsWarned) {
-        const kernel = getKernel(Draw, ENGINE.backendName);
-        if (kernel != null) {
-          console.warn("tf.browser.toPixels is not efficient to draw tensor on canvas. Please try tf.browser.draw instead.");
-          hasToPixelsWarned = true;
-        }
-      }
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
-      const imageData = new ImageData(bytes, width, height);
-      ctx.putImageData(imageData, 0, 0);
-    }
-    if ($img !== img) {
-      $img.dispose();
-    }
-    return bytes;
-  }
-  function draw(image2, canvas, options) {
-    let $img = convertToTensor(image2, "img", "draw");
-    if (!(image2 instanceof Tensor)) {
-      const originalImgTensor = $img;
-      $img = cast(originalImgTensor, "int32");
-      originalImgTensor.dispose();
-    }
-    validateImgTensor($img);
-    validateImageOptions(options === null || options === void 0 ? void 0 : options.imageOptions);
-    const inputs = { image: $img };
-    const attrs = { canvas, options };
-    ENGINE.runKernel(Draw, inputs, attrs);
-  }
-  var fromPixels2DContext, hasToPixelsWarned, fromPixels;
-  var init_browser = __esm({
-    "../node_modules/@tensorflow/tfjs-core/dist/ops/browser.js"() {
-      init_engine();
-      init_environment();
-      init_kernel_names();
-      init_kernel_registry();
-      init_tensor();
-      init_tensor_util_env();
-      init_cast();
-      init_operation();
-      init_tensor3d();
-      hasToPixelsWarned = false;
-      fromPixels = /* @__PURE__ */ op({ fromPixels_ });
-    }
-  });
-
   // ../node_modules/@tensorflow/tfjs-core/dist/ops/gather_nd_util.js
   function prepareAndValidate(tensor2, indices) {
     const tensorRank = tensor2.shape.length;
@@ -17576,7 +17354,6 @@ Manifest JSON has weights with names: ${allManifestWeightNames.join(", ")}.`);
     "../node_modules/@tensorflow/tfjs-core/dist/base.js"() {
       init_io();
       init_broadcast_util();
-      init_browser();
       init_slice_util();
       init_serialization();
       init_tensor_util();
@@ -53591,7 +53368,7 @@ Manifest JSON has weights with names: ${allManifestWeightNames.join(", ")}.`);
   });
 
   // ../node_modules/@tensorflow/tfjs-backend-cpu/dist/kernels/Draw.js
-  function draw2(args) {
+  function draw(args) {
     const { inputs, backend: backend2, attrs } = args;
     const { image: image2 } = inputs;
     const { canvas, options } = attrs;
@@ -53650,7 +53427,7 @@ Manifest JSON has weights with names: ${allManifestWeightNames.join(", ")}.`);
       drawConfig = {
         kernelName: Draw,
         backendName: "cpu",
-        kernelFunc: draw2
+        kernelFunc: draw
       };
     }
   });
@@ -69455,7 +69232,7 @@ return (log(1.0 + x) - log(1.0 - x)) / 2.0;`;
   });
 
   // ../node_modules/@tensorflow/tfjs-backend-webgl/dist/kernels/FromPixels.js
-  function fromPixels2(args) {
+  function fromPixels(args) {
     const { inputs, backend: backend2, attrs } = args;
     let { pixels } = inputs;
     const { numChannels } = attrs;
@@ -69469,14 +69246,14 @@ return (log(1.0 + x) - log(1.0 - x)) / 2.0;`;
     const outShape = [height, width, numChannels];
     if (isImage || isVideo) {
       const newWillReadFrequently = env().getBool("CANVAS2D_WILL_READ_FREQUENTLY_FOR_GPU");
-      if (fromPixels2DContext2 == null || newWillReadFrequently !== willReadFrequently) {
+      if (fromPixels2DContext == null || newWillReadFrequently !== willReadFrequently) {
         willReadFrequently = newWillReadFrequently;
-        fromPixels2DContext2 = document.createElement("canvas").getContext("2d", { willReadFrequently });
+        fromPixels2DContext = document.createElement("canvas").getContext("2d", { willReadFrequently });
       }
-      fromPixels2DContext2.canvas.width = width;
-      fromPixels2DContext2.canvas.height = height;
-      fromPixels2DContext2.drawImage(pixels, 0, 0, width, height);
-      pixels = fromPixels2DContext2.canvas;
+      fromPixels2DContext.canvas.width = width;
+      fromPixels2DContext.canvas.height = height;
+      fromPixels2DContext.drawImage(pixels, 0, 0, width, height);
+      pixels = fromPixels2DContext.canvas;
     }
     const tempPixelHandle = backend2.makeTensorInfo(texShape, "int32");
     backend2.texData.get(tempPixelHandle.dataId).usage = TextureUsage.PIXELS;
@@ -69486,7 +69263,7 @@ return (log(1.0 + x) - log(1.0 - x)) / 2.0;`;
     backend2.disposeData(tempPixelHandle.dataId);
     return res;
   }
-  var fromPixelsConfig, fromPixels2DContext2, willReadFrequently;
+  var fromPixelsConfig, fromPixels2DContext, willReadFrequently;
   var init_FromPixels = __esm({
     "../node_modules/@tensorflow/tfjs-backend-webgl/dist/kernels/FromPixels.js"() {
       init_dist();
@@ -69497,7 +69274,7 @@ return (log(1.0 + x) - log(1.0 - x)) / 2.0;`;
       fromPixelsConfig = {
         kernelName: FromPixels,
         backendName: "webgl",
-        kernelFunc: fromPixels2
+        kernelFunc: fromPixels
       };
       willReadFrequently = env().getBool("CANVAS2D_WILL_READ_FREQUENTLY_FOR_GPU");
     }
@@ -75758,21 +75535,33 @@ return a / b;`;
       reflected
     };
   }
-  function detectWithModel(canvas) {
+  function bufferToTensor(buf) {
+    const { data, width, height } = buf;
+    const floats = new Float32Array(width * height * 3);
+    for (let i = 0; i < width * height; i++) {
+      const src = i * 4;
+      const dst = i * 3;
+      floats[dst] = data[src] / 255;
+      floats[dst + 1] = data[src + 1] / 255;
+      floats[dst + 2] = data[src + 2] / 255;
+    }
+    return tensor4d(floats, [1, height, width, 3]);
+  }
+  function detectWithModel(buf) {
     if (!model2) return null;
     let result = null;
     tidy(() => {
-      const input2 = browser_exports.fromPixels(canvas).resizeBilinear([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]).toFloat().div(255).expandDims(0);
-      const pred = runModelPrediction(model2, input2);
+      const resized = buf.width === MODEL_INPUT_SIZE && buf.height === MODEL_INPUT_SIZE ? bufferToTensor(buf) : bufferToTensor(buf).resizeBilinear([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
+      const pred = runModelPrediction(model2, resized);
       const multiHead = parseMultiHeadOutput(pred);
       if (multiHead) {
-        result = multiHeadToDetection(multiHead, canvas.width, canvas.height);
+        result = multiHeadToDetection(multiHead, buf.width, buf.height);
         return;
       }
       const singleTensor = pred;
       const data = singleTensor.dataSync();
       const shape = singleTensor.shape;
-      result = parseDetections(data, shape, canvas.width, canvas.height);
+      result = parseDetections(data, shape, buf.width, buf.height);
     });
     return result;
   }
@@ -75796,6 +75585,20 @@ return a / b;`;
   }
 
   // ../src/utils/image.ts
+  function canvasToBuffer(canvas) {
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) throw new Error("Unable to get canvas context");
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    return { data: imageData.data, width: canvas.width, height: canvas.height };
+  }
+  function bufferToCanvas(buf) {
+    const { canvas, ctx } = getOrCreateCanvas(buf.width, "bufferToCanvas");
+    canvas.height = buf.height;
+    const imageData = ctx.createImageData(buf.width, buf.height);
+    imageData.data.set(buf.data);
+    ctx.putImageData(imageData, 0, 0);
+    return canvas;
+  }
   function captureFrame(video, targetSize = 320) {
     const { canvas, ctx } = getOrCreateCanvas(targetSize, "captureFrame", {
       willReadFrequently: true
@@ -75808,6 +75611,10 @@ return a / b;`;
     ctx.drawImage(video, sx, sy, side, side, 0, 0, targetSize, targetSize);
     return canvas;
   }
+  function captureFrameToBuffer(video, targetSize = 320) {
+    const canvas = captureFrame(video, targetSize);
+    return canvasToBuffer(canvas);
+  }
   function toGrayscale(data, pixelCount) {
     const gray = new Uint8Array(pixelCount);
     for (let i = 0; i < pixelCount; i++) {
@@ -75815,6 +75622,21 @@ return a / b;`;
       gray[i] = data[idx] * 77 + data[idx + 1] * 150 + data[idx + 2] * 29 >> 8;
     }
     return gray;
+  }
+  function flipBufferHorizontal(buf) {
+    const { width, height, data } = buf;
+    const out = new Uint8ClampedArray(data.length);
+    for (let y = 0; y < height; y++) {
+      for (let x2 = 0; x2 < width; x2++) {
+        const srcIdx = (y * width + x2) * 4;
+        const dstIdx = (y * width + (width - 1 - x2)) * 4;
+        out[dstIdx] = data[srcIdx];
+        out[dstIdx + 1] = data[srcIdx + 1];
+        out[dstIdx + 2] = data[srcIdx + 2];
+        out[dstIdx + 3] = data[srcIdx + 3];
+      }
+    }
+    return { data: out, width, height };
   }
 
   // ../src/scan/detector.ts
@@ -75826,19 +75648,8 @@ return a / b;`;
     cosTable[t] = Math.cos(angle);
     sinTable[t] = Math.sin(angle);
   }
-  function detectCircle(frame2) {
-    const ctx = frame2.getContext("2d", { willReadFrequently: true });
-    if (!ctx) {
-      return {
-        cx: frame2.width / 2,
-        cy: frame2.height / 2,
-        r: Math.min(frame2.width, frame2.height) * 0.4,
-        confidence: 0
-      };
-    }
-    const width = frame2.width;
-    const height = frame2.height;
-    const data = ctx.getImageData(0, 0, width, height).data;
+  function detectCircle(buf) {
+    const { data, width, height } = buf;
     const gray = toGrayscale(data, width * height);
     const edges = sobelEdgeDetect(gray, width, height);
     return houghCircleDetect(edges, width, height);
@@ -75912,6 +75723,47 @@ return a / b;`;
     return { cx: bestCx, cy: bestCy, r: bestR, confidence };
   }
 
+  // ../src/scan/frameScorer.ts
+  function scoreFrame(buf, cx, cy, r) {
+    const { data, width, height } = buf;
+    const left = Math.max(0, Math.floor(cx - r));
+    const top = Math.max(0, Math.floor(cy - r));
+    const regionW = Math.min(Math.ceil(r * 2), width - left);
+    const regionH = Math.min(Math.ceil(r * 2), height - top);
+    if (regionW <= 2 || regionH <= 2) return { sharpness: 0, contrast: 0, overall: 0 };
+    const regionData = new Uint8ClampedArray(regionW * regionH * 4);
+    for (let y = 0; y < regionH; y++) {
+      const srcOffset = ((top + y) * width + left) * 4;
+      const dstOffset = y * regionW * 4;
+      regionData.set(data.subarray(srcOffset, srcOffset + regionW * 4), dstOffset);
+    }
+    const gray = toGrayscale(regionData, regionW * regionH);
+    let lapSum = 0;
+    let lapCount = 0;
+    let sum5 = 0;
+    let sumSq = 0;
+    for (let y = 1; y < regionH - 1; y += 2) {
+      for (let x2 = 1; x2 < regionW - 1; x2 += 2) {
+        const idx = y * regionW + x2;
+        const v = gray[idx];
+        const lap = -4 * v + gray[idx - 1] + gray[idx + 1] + gray[idx - regionW] + gray[idx + regionW];
+        lapSum += lap * lap;
+        lapCount++;
+        sum5 += v;
+        sumSq += v * v;
+      }
+    }
+    const sharpness = lapCount > 0 ? lapSum / lapCount : 0;
+    const totalSampled = lapCount;
+    const mean3 = totalSampled > 0 ? sum5 / totalSampled : 0;
+    const variance = totalSampled > 0 ? sumSq / totalSampled - mean3 * mean3 : 0;
+    const contrast = Math.sqrt(Math.max(0, variance));
+    const normalizedSharpness = Math.min(sharpness / 500, 1);
+    const normalizedContrast = Math.min(contrast / 80, 1);
+    const overall = normalizedSharpness * 0.6 + normalizedContrast * 0.4;
+    return { sharpness, contrast, overall };
+  }
+
   // ../src/scan/perspective.ts
   function solveHomography(src, dst) {
     if (src.length !== 4 || dst.length !== 4) {
@@ -75958,7 +75810,7 @@ return a / b;`;
     }
     return aug.map((row) => row[n]);
   }
-  function warpPerspective(srcCanvas, srcCorners, outputSize) {
+  function warpPerspective(src, srcCorners, outputSize) {
     const dstCorners = [
       { x: 0, y: 0 },
       { x: outputSize, y: 0 },
@@ -75969,15 +75821,10 @@ return a / b;`;
     const h0 = H[0], h1 = H[1], h2 = H[2];
     const h3 = H[3], h4 = H[4], h5 = H[5];
     const h6 = H[6], h7 = H[7], h8 = H[8];
-    const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true });
-    const srcPixels = srcCtx.getImageData(0, 0, srcCanvas.width, srcCanvas.height).data;
-    const srcW = srcCanvas.width;
-    const srcH = srcCanvas.height;
-    const { canvas, ctx } = getOrCreateCanvas(outputSize, "warpPerspective", {
-      willReadFrequently: true
-    });
-    const outData = ctx.createImageData(outputSize, outputSize);
-    const out = outData.data;
+    const srcPixels = src.data;
+    const srcW = src.width;
+    const srcH = src.height;
+    const out = new Uint8ClampedArray(outputSize * outputSize * 4);
     for (let dy = 0; dy < outputSize; dy++) {
       for (let dx = 0; dx < outputSize; dx++) {
         const w = h6 * dx + h7 * dy + h8;
@@ -76005,8 +75852,7 @@ return a / b;`;
         out[outIdx + 3] = 255;
       }
     }
-    ctx.putImageData(outData, 0, 0);
-    return canvas;
+    return { data: out, width: outputSize, height: outputSize };
   }
   function estimateCircleCorners(cx, cy, r, padding = 1, angle = 0) {
     const pad2 = r * padding;
@@ -76025,20 +75871,15 @@ return a / b;`;
   }
 
   // ../src/scan/sampler.ts
-  function samplePolarGrid(frame2, cx, cy, codeSize, rings = 5, segmentsPerRing = 48) {
-    const ctx = frame2.getContext("2d", { willReadFrequently: true });
-    if (!ctx) {
-      throw new Error("Unable to sample frame: canvas context unavailable.");
-    }
-    const { width, height } = frame2;
-    const data = ctx.getImageData(0, 0, width, height).data;
+  function samplePolarGrid(frame2, cx, cy, codeSize, rings = 5, segmentsPerRing = 48, orientationOffset = 0) {
+    const { data, width, height } = frame2;
     const bits = [];
     for (let r = 0; r < rings; r++) {
       if (!isDataRing(r)) continue;
       const segs = getSegmentsForRing(r, rings, segmentsPerRing);
       const sampleRadius = getRingRadius(r, rings, codeSize);
       for (let segment = 0; segment < segs; segment++) {
-        const angle = getSegmentAngle(segment, segs);
+        const angle = getSegmentAngle(segment, segs) + orientationOffset;
         const x2 = Math.round(cx + sampleRadius * Math.cos(angle));
         const y = Math.round(cy + sampleRadius * Math.sin(angle));
         if (x2 < 0 || x2 >= width || y < 0 || y >= height) {
@@ -76054,11 +75895,8 @@ return a / b;`;
   }
 
   // ../src/scan/validator.ts
-  function validateCircularCode(canvas, rings, size, threshold3 = 0.5) {
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return { valid: false, centerDot: false, ringContrast: false, segmentPattern: false, score: 0 };
-    const { width, height } = canvas;
-    const data = ctx.getImageData(0, 0, width, height).data;
+  function validateCircularCode(buf, rings, size, threshold3 = 0.5) {
+    const { data, width, height } = buf;
     const gray = toGrayscale(data, width * height);
     const cx = width / 2;
     const cy = height / 2;
@@ -76114,7 +75952,7 @@ return a / b;`;
       const angle = a / numAngles * Math.PI * 2;
       let prevBright = 128;
       let transitionsOnRay = 0;
-      for (let r = 0; r < rings + 2; r++) {
+      for (let r = 0; r < rings + 3; r++) {
         const radius = (r + 0.5) * ringWidth;
         const x2 = cx + radius * Math.cos(angle);
         const y = cy + radius * Math.sin(angle);
@@ -76151,6 +75989,86 @@ return a / b;`;
       if (darkRuns >= 2 && lightRuns >= 2) ringsWithGaps++;
     }
     return ringsWithGaps >= Math.max(1, (rings - 1) * 0.4);
+  }
+
+  // ../src/scan/index.ts
+  var CAPTURE_SIZE = 320;
+  var CODE_SIZE = 300;
+  function detectCode(buf) {
+    if (isModelLoaded()) {
+      const mlResult = detectWithModel(buf);
+      if (mlResult) return mlResult;
+    }
+    return detectCircle(buf);
+  }
+  function resolveCorners(detection, padding = 1.15) {
+    if (detection.corners && detection.corners.length === 4) {
+      return detection.corners;
+    }
+    return estimateCircleCorners(
+      detection.cx,
+      detection.cy,
+      detection.r,
+      padding,
+      detection.angle ?? 0
+    );
+  }
+  function scanFrame(source, options = {}) {
+    const {
+      rings = 5,
+      segmentsPerRing = 48,
+      eccBytes = 16,
+      captureSize = CAPTURE_SIZE,
+      codeSize = CODE_SIZE
+    } = options;
+    let captured;
+    if (source instanceof HTMLVideoElement) {
+      captured = captureFrameToBuffer(source, captureSize);
+    } else if (typeof HTMLCanvasElement !== "undefined" && source instanceof HTMLCanvasElement) {
+      captured = canvasToBuffer(source);
+    } else {
+      captured = source;
+    }
+    const detection = detectCode(captured);
+    const detected = detection.confidence >= 0.5;
+    const activeDetection = detected ? detection : { cx: captured.width / 2, cy: captured.height / 2, r: captured.width * 0.35, confidence: 0 };
+    const corners = resolveCorners(activeDetection);
+    let rectified = warpPerspective(captured, corners, codeSize);
+    if (activeDetection.reflected) {
+      rectified = flipBufferHorizontal(rectified);
+    }
+    const validation = validateCircularCode(rectified, rings, codeSize);
+    const frameScoreResult = scoreFrame(captured, activeDetection.cx, activeDetection.cy, activeDetection.r);
+    const bits = samplePolarGrid(
+      rectified,
+      codeSize / 2,
+      codeSize / 2,
+      codeSize,
+      rings,
+      segmentsPerRing
+    );
+    let decoded = null;
+    let error = null;
+    if (validation.valid) {
+      try {
+        decoded = decode(bits, eccBytes);
+      } catch (e) {
+        error = e.message;
+      }
+    } else {
+      error = `Not a circular code (score=${validation.score.toFixed(2)})`;
+    }
+    return {
+      detected,
+      decoded,
+      error,
+      detection,
+      corners,
+      rectified,
+      bits,
+      validation,
+      frameScore: frameScoreResult
+    };
   }
 
   // app.ts
@@ -76241,11 +76159,10 @@ return a / b;`;
   var stopScanBtn = document.getElementById("stop-scan-btn");
   var scanVideo = document.getElementById("scan-video");
   var scanStatus = document.getElementById("scan-status");
-  var scanResult = document.getElementById("scan-result");
+  var scanResultEl = document.getElementById("scan-result");
   var stream = null;
   var scanning = false;
   var paused = false;
-  var useMLModel = true;
   var frameCount = 0;
   var decodeCount = 0;
   var resumeBtn = document.getElementById("resume-btn");
@@ -76285,8 +76202,8 @@ return a / b;`;
         modelStatus.textContent = "Model: loaded";
         modelStatus.style.color = "#6cbf6c";
       }
-      scanResult.textContent = "";
-      scanResult.className = "decode-result";
+      scanResultEl.textContent = "";
+      scanResultEl.className = "decode-result";
       scanLoop();
     } catch (e) {
       scanStatus.textContent = `Camera error: ${e.message}`;
@@ -76298,8 +76215,8 @@ return a / b;`;
     paused = false;
     scanVideo.play();
     resumeBtn.style.display = "none";
-    scanResult.textContent = "";
-    scanResult.className = "decode-result";
+    scanResultEl.textContent = "";
+    scanResultEl.className = "decode-result";
     scanStatus.textContent = "Scanning...";
     scanStatus.className = "scan-status active";
     scanLoop();
@@ -76315,6 +76232,10 @@ return a / b;`;
     }
     lastScanTime = now2;
     frameCount++;
+    const rings = parseInt(optRings.value);
+    const segmentsPerRing = parseInt(optSegments.value);
+    const eccBytes = parseInt(optEcc.value);
+    const result = scanFrame(scanVideo, { rings, segmentsPerRing, eccBytes });
     const overlay = document.getElementById("scan-overlay");
     const videoW = scanVideo.videoWidth || scanVideo.clientWidth;
     const videoH = scanVideo.videoHeight || scanVideo.clientHeight;
@@ -76325,126 +76246,98 @@ return a / b;`;
     const side = Math.min(videoW, videoH);
     const guideX = (videoW - side) / 2;
     const guideY = (videoH - side) / 2;
+    const scaleX = side / 320;
     octx.strokeStyle = "#ffffff30";
     octx.lineWidth = 2;
     octx.strokeRect(guideX, guideY, side, side);
-    const captureSize = 320;
-    const captured = captureFrame(scanVideo, captureSize);
-    const scaleX = side / captureSize;
-    const offsetX = guideX;
-    const offsetY = guideY;
-    const detection = useMLModel && isModelLoaded() ? detectWithModel(captured) ?? detectCircle(captured) : detectCircle(captured);
-    octx.strokeStyle = detection.confidence > 0.9 ? "#00ff00" : detection.confidence > 0.5 ? "#ffff00" : "#ff0000";
+    const det = result.detection;
+    octx.strokeStyle = det.confidence > 0.9 ? "#00ff00" : det.confidence > 0.5 ? "#ffff00" : "#ff0000";
     octx.lineWidth = 3;
     octx.beginPath();
-    octx.arc(
-      offsetX + detection.cx * scaleX,
-      offsetY + detection.cy * scaleX,
-      detection.r * scaleX,
-      0,
-      Math.PI * 2
-    );
+    octx.arc(guideX + det.cx * scaleX, guideY + det.cy * scaleX, det.r * scaleX, 0, Math.PI * 2);
     octx.stroke();
-    if (detection.corners && detection.corners.length === 4) {
+    if (det.corners && det.corners.length === 4) {
       octx.strokeStyle = "#00ffff";
       octx.lineWidth = 2;
       octx.beginPath();
-      const c = detection.corners;
-      octx.moveTo(offsetX + c[0].x * scaleX, offsetY + c[0].y * scaleX);
-      for (let ci = 1; ci < 4; ci++) {
-        octx.lineTo(offsetX + c[ci].x * scaleX, offsetY + c[ci].y * scaleX);
+      octx.moveTo(guideX + det.corners[0].x * scaleX, guideY + det.corners[0].y * scaleX);
+      for (let i = 1; i < 4; i++) {
+        octx.lineTo(guideX + det.corners[i].x * scaleX, guideY + det.corners[i].y * scaleX);
       }
       octx.closePath();
       octx.stroke();
-      for (let ci = 0; ci < 4; ci++) {
+      for (const c of det.corners) {
         octx.fillStyle = "#00ffff";
         octx.beginPath();
-        octx.arc(offsetX + c[ci].x * scaleX, offsetY + c[ci].y * scaleX, 4, 0, Math.PI * 2);
+        octx.arc(guideX + c.x * scaleX, guideY + c.y * scaleX, 4, 0, Math.PI * 2);
         octx.fill();
       }
     }
-    octx.fillStyle = detection.confidence > 0.5 ? "#00ff00" : "#ff0000";
+    octx.fillStyle = det.confidence > 0.5 ? "#00ff00" : "#ff0000";
     octx.font = "14px monospace";
-    const angleDeg = detection.angle != null ? ` ang: ${(detection.angle * 180 / Math.PI).toFixed(0)}` : "";
-    const orientDeg = detection.orientation != null ? ` ori: ${(detection.orientation * 180 / Math.PI).toFixed(0)}` : "";
-    const reflTag = detection.reflected ? " REFLECTED" : "";
+    const ang = det.angle != null ? ` ang:${(det.angle * 180 / Math.PI).toFixed(0)}` : "";
+    const ori = det.orientation != null ? ` ori:${(det.orientation * 180 / Math.PI).toFixed(0)}` : "";
+    const ref = det.reflected ? " REFLECTED" : "";
     octx.fillText(
-      `conf: ${(detection.confidence * 100).toFixed(0)}% r: ${detection.r.toFixed(0)} (${detection.cx.toFixed(0)},${detection.cy.toFixed(0)})${angleDeg}${orientDeg}${reflTag}`,
+      `conf:${(det.confidence * 100).toFixed(0)}% r:${det.r.toFixed(0)} (${det.cx.toFixed(0)},${det.cy.toFixed(0)})${ang}${ori}${ref}`,
       8,
       20
     );
     const debugCanvas = document.getElementById("debug-warp");
-    const debugCtx = debugCanvas.getContext("2d", { willReadFrequently: true });
-    const codeSize = 300;
+    const codeSize = result.rectified.width;
     if (debugCanvas.width !== codeSize) debugCanvas.width = codeSize;
     if (debugCanvas.height !== codeSize) debugCanvas.height = codeSize;
-    const useDet = detection.confidence >= 0.5;
-    let srcCorners;
-    if (useDet && detection.corners && detection.corners.length === 4) {
-      srcCorners = detection.corners;
-    } else {
-      const warpCx = useDet ? detection.cx : captureSize / 2;
-      const warpCy = useDet ? detection.cy : captureSize / 2;
-      const warpR = useDet ? detection.r : captureSize * 0.35;
-      const warpAngle = useDet ? detection.angle ?? 0 : 0;
-      srcCorners = estimateCircleCorners(warpCx, warpCy, warpR, 1.15, warpAngle);
-    }
-    const warped = warpPerspective(captured, srcCorners, codeSize);
-    debugCtx.drawImage(warped, 0, 0);
-    const rings = parseInt(optRings.value);
-    const segmentsPerRing = parseInt(optSegments.value);
-    const bits = samplePolarGrid(warped, codeSize / 2, codeSize / 2, codeSize, rings, segmentsPerRing);
+    const debugCtx = debugCanvas.getContext("2d", { willReadFrequently: true });
+    const rectifiedCanvas = bufferToCanvas(result.rectified);
+    debugCtx.drawImage(rectifiedCanvas, 0, 0);
     let bitIdx = 0;
     for (let r = 0; r < rings; r++) {
       if (!isDataRing(r)) continue;
       const segs = getSegmentsForRing(r, rings, segmentsPerRing);
       const radius = getRingRadius(r, rings, codeSize);
       for (let s = 0; s < segs; s++) {
-        const bit = bits[bitIdx++] ?? 0;
+        const bit = result.bits[bitIdx++] ?? 0;
         const angle = getSegmentAngle(s, segs);
-        const x2 = codeSize / 2 + radius * Math.cos(angle);
-        const y = codeSize / 2 + radius * Math.sin(angle);
         debugCtx.fillStyle = bit ? "#00ff00" : "#ff000080";
         debugCtx.beginPath();
-        debugCtx.arc(x2, y, 2, 0, Math.PI * 2);
+        debugCtx.arc(
+          codeSize / 2 + radius * Math.cos(angle),
+          codeSize / 2 + radius * Math.sin(angle),
+          2,
+          0,
+          Math.PI * 2
+        );
         debugCtx.fill();
       }
     }
-    const eccBytes = parseInt(optEcc.value);
-    const validation = validateCircularCode(warped, rings, codeSize);
-    let stage = useDet ? "detected" : "center-crop";
-    octx.fillStyle = validation.valid ? "#00ff0080" : "#ff000040";
+    const v = result.validation;
+    octx.fillStyle = v.valid ? "#00ff0080" : "#ff000040";
     octx.font = "12px monospace";
     octx.fillText(
-      `valid: ${validation.valid ? "YES" : "no"} (${validation.score.toFixed(2)}) dot:${validation.centerDot ? "Y" : "n"} ring:${validation.ringContrast ? "Y" : "n"} seg:${validation.segmentPattern ? "Y" : "n"}`,
+      `valid:${v.valid ? "YES" : "no"} (${v.score.toFixed(2)}) dot:${v.centerDot ? "Y" : "n"} ring:${v.ringContrast ? "Y" : "n"} seg:${v.segmentPattern ? "Y" : "n"}`,
       8,
       videoH - 8
     );
-    if (validation.valid) {
-      try {
-        const decoded = decode(bits, eccBytes);
-        decodeCount++;
-        scanResult.textContent = decoded;
-        scanResult.className = "decode-result success";
-        scanStatus.textContent = `Decoded: "${decoded}"`;
-        scanStatus.className = "scan-status active";
-        octx.fillStyle = "#00ff00";
-        octx.font = "14px monospace";
-        octx.fillText(`DECODED: ${decoded}`, 8, 40);
-        paused = true;
-        scanVideo.pause();
-        resumeBtn.style.display = "inline-block";
-        return;
-      } catch (e) {
-        stage += ` | ${e.message.slice(0, 50)}`;
-      }
-    } else {
-      stage += " | not a circular code";
+    if (result.decoded) {
+      decodeCount++;
+      scanResultEl.textContent = result.decoded;
+      scanResultEl.className = "decode-result success";
+      scanStatus.textContent = `Decoded: "${result.decoded}"`;
+      scanStatus.className = "scan-status active";
+      octx.fillStyle = "#00ff00";
+      octx.font = "14px monospace";
+      octx.fillText(`DECODED: ${result.decoded}`, 8, 40);
+      paused = true;
+      scanVideo.pause();
+      resumeBtn.style.display = "inline-block";
+      return;
     }
+    const stage = result.detected ? "detected" : "center-crop";
+    const detail = result.error ? ` | ${result.error.slice(0, 50)}` : "";
     octx.fillStyle = "#ffffff";
     octx.font = "14px monospace";
-    octx.fillText(`f:${frameCount} | ${stage}`, 8, 40);
-    scanStatus.textContent = `f:${frameCount} | ${stage}`;
+    octx.fillText(`f:${frameCount} | ${stage}${detail}`, 8, 40);
+    scanStatus.textContent = `f:${frameCount} | ${stage}${detail}`;
     requestAnimationFrame(scanLoop);
   }
   function stopScan() {
@@ -76466,8 +76359,7 @@ return a / b;`;
   scanBtn.addEventListener("click", startScan);
   stopScanBtn.addEventListener("click", stopScan);
   resumeBtn.addEventListener("click", resumeScan);
-  document.getElementById("toggle-ml").addEventListener("change", (e) => {
-    useMLModel = e.target.checked;
+  document.getElementById("toggle-ml").addEventListener("change", () => {
   });
 })();
 /*! Bundled license information:
@@ -77421,7 +77313,6 @@ return a / b;`;
 @tensorflow/tfjs-core/dist/ops/signal/stft.js:
 @tensorflow/tfjs-core/dist/backends/non_max_suppression_util.js:
 @tensorflow/tfjs-core/dist/io/progress.js:
-@tensorflow/tfjs-core/dist/ops/browser.js:
 @tensorflow/tfjs-core/dist/gradients/Square_grad.js:
 @tensorflow/tfjs-converter/dist/operations/custom_op/register.js:
 @tensorflow/tfjs-converter/dist/operations/custom_op/node_value_impl.js:

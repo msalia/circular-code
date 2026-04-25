@@ -62,11 +62,13 @@ describe("layout", () => {
       const total = getTotalSegments(5, 48);
       const ring0Segs = getSegmentsForRing(0, 5, 48);
       let manualTotal = 0;
+      let totalWithAll = 0;
       for (let r = 0; r < 5; r++) {
+        totalWithAll += getSegmentsForRing(r, 5, 48);
         if (isDataRing(r)) manualTotal += getSegmentsForRing(r, 5, 48);
       }
       expect(total).toBe(manualTotal);
-      expect(total).not.toContain(ring0Segs);
+      expect(total).toBe(totalWithAll - ring0Segs);
     });
 
     it("returns fewer total segments than rings * baseSegments", () => {

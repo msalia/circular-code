@@ -1,4 +1,4 @@
-import type { DetectionResult, ScanOptions, ScanResult } from "@/types";
+import type { DetectionResult, FrameScore, ImageBuffer, Point, ScanOptions, ScanResult } from "@/types";
 
 import { decode } from "@/core/decoder";
 import { detectWithModel, isModelLoaded, loadModel } from "@/ml/detector";
@@ -6,13 +6,181 @@ import { MultiFrameConsensus } from "@/scan/consensus";
 import { detectCircle } from "@/scan/detector";
 import { scoreFrame } from "@/scan/frameScorer";
 import { estimateCircleCorners, warpPerspective } from "@/scan/perspective";
-import { getOrCreateCanvas } from "@/utils/canvas";
 import { samplePolarGrid } from "@/scan/sampler";
 import { validateCircularCode } from "@/scan/validator";
-import { captureFrame } from "@/utils/image";
+import type { ValidationResult } from "@/scan/validator";
+import { canvasToBuffer, captureFrameToBuffer, flipBufferHorizontal } from "@/utils/image";
 
 const CAPTURE_SIZE = 320;
 const CODE_SIZE = 300;
+
+export type ScanFrameOptions = {
+  rings?: number;
+  segmentsPerRing?: number;
+  eccBytes?: number;
+  captureSize?: number;
+  codeSize?: number;
+};
+
+export type ScanFrameResult = {
+  detected: boolean;
+  decoded: string | null;
+  error: string | null;
+  detection: DetectionResult;
+  corners: Point[];
+  rectified: ImageBuffer;
+  bits: number[];
+  validation: ValidationResult;
+  frameScore: FrameScore;
+};
+
+export function detectCode(buf: ImageBuffer): DetectionResult {
+  if (isModelLoaded()) {
+    const mlResult = detectWithModel(buf);
+    if (mlResult) return mlResult;
+  }
+  return detectCircle(buf);
+}
+
+export function resolveCorners(detection: DetectionResult, padding = 1.15): Point[] {
+  if (detection.corners && detection.corners.length === 4) {
+    return detection.corners;
+  }
+  return estimateCircleCorners(
+    detection.cx,
+    detection.cy,
+    detection.r,
+    padding,
+    detection.angle ?? 0,
+  );
+}
+
+export function flipHorizontal(buf: ImageBuffer): ImageBuffer {
+  return flipBufferHorizontal(buf);
+}
+
+export type RectifyResult = {
+  image: ImageBuffer;
+  corners: Point[];
+  validation: ValidationResult;
+};
+
+export function rectifyCode(
+  frame: ImageBuffer,
+  detection: DetectionResult,
+  rings: number,
+  outputSize = CODE_SIZE,
+): RectifyResult {
+  const corners = resolveCorners(detection);
+  let rectified = warpPerspective(frame, corners, outputSize);
+
+  if (detection.reflected) {
+    rectified = flipBufferHorizontal(rectified);
+  }
+
+  const validation = validateCircularCode(rectified, rings, outputSize);
+
+  return { image: rectified, corners, validation };
+}
+
+export function scanFrame(
+  source: HTMLVideoElement | HTMLCanvasElement | ImageBuffer,
+  options: ScanFrameOptions = {},
+): ScanFrameResult {
+  const {
+    rings = 5,
+    segmentsPerRing = 48,
+    eccBytes = 16,
+    captureSize = CAPTURE_SIZE,
+    codeSize = CODE_SIZE,
+  } = options;
+
+  let captured: ImageBuffer;
+  if (source instanceof HTMLVideoElement) {
+    captured = captureFrameToBuffer(source, captureSize);
+  } else if (typeof HTMLCanvasElement !== "undefined" && source instanceof HTMLCanvasElement) {
+    captured = canvasToBuffer(source);
+  } else {
+    captured = source as ImageBuffer;
+  }
+
+  const detection = detectCode(captured);
+  const detected = detection.confidence >= 0.5;
+
+  const activeDetection: DetectionResult = detected
+    ? detection
+    : { cx: captured.width / 2, cy: captured.height / 2, r: captured.width * 0.35, confidence: 0 };
+
+  const corners = resolveCorners(activeDetection);
+  let rectified = warpPerspective(captured, corners, codeSize);
+
+  if (activeDetection.reflected) {
+    rectified = flipBufferHorizontal(rectified);
+  }
+
+  const validation = validateCircularCode(rectified, rings, codeSize);
+  const frameScoreResult = scoreFrame(captured, activeDetection.cx, activeDetection.cy, activeDetection.r);
+
+  const bits = samplePolarGrid(
+    rectified,
+    codeSize / 2,
+    codeSize / 2,
+    codeSize,
+    rings,
+    segmentsPerRing,
+  );
+
+  let decoded: string | null = null;
+  let error: string | null = null;
+
+  if (validation.valid) {
+    try {
+      decoded = decode(bits, eccBytes);
+    } catch (e: any) {
+      error = e.message;
+    }
+  } else {
+    error = `Not a circular code (score=${validation.score.toFixed(2)})`;
+  }
+
+  return {
+    detected,
+    decoded,
+    error,
+    detection,
+    corners,
+    rectified,
+    bits,
+    validation,
+    frameScore: frameScoreResult,
+  };
+}
+
+export function sampleAndDecode(
+  frame: ImageBuffer,
+  detection: DetectionResult,
+  rings: number,
+  segmentsPerRing: number,
+  eccBytes: number,
+  outputSize = CODE_SIZE,
+): string {
+  const { image: rectified, validation } = rectifyCode(frame, detection, rings, outputSize);
+
+  if (!validation.valid) {
+    throw new Error(`Not a circular code (score=${validation.score.toFixed(2)})`);
+  }
+
+  const bits = samplePolarGrid(
+    rectified,
+    outputSize / 2,
+    outputSize / 2,
+    outputSize,
+    rings,
+    segmentsPerRing,
+  );
+
+  return decode(bits, eccBytes);
+}
 
 export async function scanFromVideo(
   video: HTMLVideoElement,
@@ -41,15 +209,15 @@ export async function scanFromVideo(
       if (!running) return;
 
       try {
-        const result = processFrame(video, {
-          rings,
-          segmentsPerRing,
-          eccBytes,
-          minFrameScore,
-        });
+        const result = scanFrame(video, { rings, segmentsPerRing, eccBytes });
 
-        if (result) {
-          const consensusResult = consensus.push(result);
+        if (result.decoded && result.frameScore.overall >= minFrameScore) {
+          const scanResult: ScanResult = {
+            data: result.decoded,
+            confidence: result.detection.confidence,
+            frameScore: result.frameScore,
+          };
+          const consensusResult = consensus.push(scanResult);
           if (consensusResult) {
             running = false;
             resolve(consensusResult.data);
@@ -74,67 +242,6 @@ export async function scanFromVideo(
   });
 }
 
-function detect(canvas: HTMLCanvasElement): DetectionResult {
-  if (isModelLoaded()) {
-    const mlResult = detectWithModel(canvas);
-    if (mlResult) return mlResult;
-  }
-  return detectCircle(canvas);
-}
-
-function getCornersForWarp(detection: DetectionResult): { x: number; y: number }[] {
-  if (detection.corners && detection.corners.length === 4) {
-    return detection.corners;
-  }
-  return estimateCircleCorners(
-    detection.cx,
-    detection.cy,
-    detection.r,
-    1.15,
-    detection.angle ?? 0,
-  );
-}
-
-function flipHorizontal(src: HTMLCanvasElement): HTMLCanvasElement {
-  const { canvas, ctx } = getOrCreateCanvas(src.width, "flipH");
-  canvas.height = src.height;
-  ctx.translate(src.width, 0);
-  ctx.scale(-1, 1);
-  ctx.drawImage(src, 0, 0);
-  return canvas;
-}
-
-function sampleAndDecode(
-  canvas: HTMLCanvasElement,
-  detection: DetectionResult,
-  rings: number,
-  segmentsPerRing: number,
-  eccBytes: number,
-): string {
-  const srcCorners = getCornersForWarp(detection);
-  let rectified = warpPerspective(canvas, srcCorners, CODE_SIZE);
-
-  if (detection.reflected) {
-    rectified = flipHorizontal(rectified);
-  }
-
-  const validation = validateCircularCode(rectified, rings, CODE_SIZE);
-  if (!validation.valid) {
-    throw new Error(`Not a circular code (score=${validation.score.toFixed(2)})`);
-  }
-
-  const bits = samplePolarGrid(
-    rectified,
-    CODE_SIZE / 2,
-    CODE_SIZE / 2,
-    CODE_SIZE,
-    rings,
-    segmentsPerRing,
-  );
-
-  return decode(bits, eccBytes);
-}
-
 export function processFrame(
   video: HTMLVideoElement,
   options: {
@@ -146,35 +253,15 @@ export function processFrame(
 ): ScanResult | null {
   const { rings = 5, segmentsPerRing = 48, eccBytes = 16, minFrameScore = 0.3 } = options;
 
-  const captured = captureFrame(video, CAPTURE_SIZE);
+  const result = scanFrame(video, { rings, segmentsPerRing, eccBytes });
 
-  const detection = detect(captured);
-
-  if (detection.confidence >= 0.5) {
-    const frameScore = scoreFrame(captured, detection.cx, detection.cy, detection.r);
-
-    if (frameScore.overall >= minFrameScore) {
-      try {
-        const data = sampleAndDecode(captured, detection, rings, segmentsPerRing, eccBytes);
-        return { data, confidence: detection.confidence, frameScore };
-      } catch {
-        // detection-based decode failed, fall through to center crop
-      }
-    }
+  if (result.decoded && result.frameScore.overall >= minFrameScore) {
+    return {
+      data: result.decoded,
+      confidence: result.detection.confidence,
+      frameScore: result.frameScore,
+    };
   }
 
-  // Fallback: assume code is centered in frame
-  const cx = CAPTURE_SIZE / 2;
-  const cy = CAPTURE_SIZE / 2;
-  const r = CAPTURE_SIZE * 0.35;
-  const fallback: DetectionResult = { cx, cy, r, confidence: 0 };
-
-  const data = sampleAndDecode(captured, fallback, rings, segmentsPerRing, eccBytes);
-  const frameScore = scoreFrame(captured, cx, cy, r);
-
-  return {
-    data,
-    confidence: 0,
-    frameScore,
-  };
+  return null;
 }

@@ -1,26 +1,30 @@
-import type { FrameScore } from "@/types";
+import type { FrameScore, ImageBuffer } from "@/types";
 
 import { toGrayscale } from "@/utils/image";
 
 export function scoreFrame(
-  canvas: HTMLCanvasElement,
+  buf: ImageBuffer,
   cx: number,
   cy: number,
   r: number,
 ): FrameScore {
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return { sharpness: 0, contrast: 0, overall: 0 };
+  const { data, width, height } = buf;
 
   const left = Math.max(0, Math.floor(cx - r));
   const top = Math.max(0, Math.floor(cy - r));
-  const regionW = Math.min(Math.ceil(r * 2), canvas.width - left);
-  const regionH = Math.min(Math.ceil(r * 2), canvas.height - top);
+  const regionW = Math.min(Math.ceil(r * 2), width - left);
+  const regionH = Math.min(Math.ceil(r * 2), height - top);
 
   if (regionW <= 2 || regionH <= 2) return { sharpness: 0, contrast: 0, overall: 0 };
 
-  const data = ctx.getImageData(left, top, regionW, regionH).data;
+  const regionData = new Uint8ClampedArray(regionW * regionH * 4);
+  for (let y = 0; y < regionH; y++) {
+    const srcOffset = ((top + y) * width + left) * 4;
+    const dstOffset = y * regionW * 4;
+    regionData.set(data.subarray(srcOffset, srcOffset + regionW * 4), dstOffset);
+  }
 
-  const gray = toGrayscale(data, regionW * regionH);
+  const gray = toGrayscale(regionData, regionW * regionH);
 
   let lapSum = 0;
   let lapCount = 0;

@@ -39,17 +39,15 @@ describe("renderSVG", () => {
     expect(pathRadii).not.toContain(innerRingRadius);
   });
 
-  it("consumes correct number of bits from data rings only", () => {
-    const { rings, segmentsPerRing } = code;
-    let expectedBits = 0;
-    for (let r = 0; r < rings; r++) {
-      if (isDataRing(r)) expectedBits += getSegmentsForRing(r, rings, segmentsPerRing);
-    }
-    const svg = renderSVG(code);
-    const primaryPaths = svg.split('stroke="#000000"')[1]?.split("</g>")[0] || "";
-    const secondaryPaths = svg.split('stroke="#d0d0d0"')[1]?.split("</g>")[0] || "";
-    const hasPaths = primaryPaths.includes("<path") || secondaryPaths.includes("<path");
-    expect(hasPaths).toBe(true);
+  it("renders paths for each data ring", () => {
+    const { rings } = code;
+    const svg = renderSVG(code, { size: 300 });
+    const primaryGroup = svg.split('stroke="#000000"')[1]?.split("</g>")[0] || "";
+    const secondaryGroup = svg.split('stroke="#d0d0d0"')[1]?.split("</g>")[0] || "";
+    const allPaths = (primaryGroup.match(/<path/g) || []).length + (secondaryGroup.match(/<path/g) || []).length;
+    let dataRingCount = 0;
+    for (let r = 0; r < rings; r++) if (isDataRing(r)) dataRingCount++;
+    expect(allPaths).toBeGreaterThanOrEqual(dataRingCount);
   });
 
   it("merges consecutive 1-bits into single arcs", () => {
@@ -62,16 +60,21 @@ describe("renderSVG", () => {
     expect(pathCount).toBe(dataRingCount);
   });
 
-  it("secondary arcs have separation from primary arcs", () => {
+  it("renders both primary and secondary arcs for mixed data", () => {
     const svg = renderSVG(code, { size: 300 });
     const secondaryGroup = svg.split('stroke="#d0d0d0"')[1]?.split("</g>")[0] || "";
     const primaryGroup = svg.split('stroke="#000000"')[1]?.split("</g>")[0] || "";
-    if (secondaryGroup.includes("<path") && primaryGroup.includes("<path")) {
-      const secStarts = [...secondaryGroup.matchAll(/M (\d+\.?\d*) (\d+\.?\d*)/g)];
-      const priEnds = [...primaryGroup.matchAll(/A .+?(\d+\.?\d*) (\d+\.?\d*)"/g)];
-      expect(secStarts.length).toBeGreaterThan(0);
-      expect(priEnds.length).toBeGreaterThan(0);
-    }
+    expect(secondaryGroup).toContain("<path");
+    expect(primaryGroup).toContain("<path");
+  });
+
+  it("all-zero bits produce only secondary arcs, no primary", () => {
+    const allZeros = { bits: new Array(200).fill(0), rings: 5, segmentsPerRing: 48 };
+    const svg = renderSVG(allZeros, { size: 300 });
+    const secondaryGroup = svg.split('stroke="#d0d0d0"')[1]?.split("</g>")[0] || "";
+    const primaryGroup = svg.split('stroke="#000000"')[1]?.split("</g>")[0] || "";
+    expect(secondaryGroup).toContain("<path");
+    expect((primaryGroup.match(/<path/g) || []).length).toBe(0);
   });
 
   it("secondary is suppressed when set to none", () => {

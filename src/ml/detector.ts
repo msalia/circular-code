@@ -1,4 +1,4 @@
-import type { DetectionResult } from "@/types";
+import type { DetectionResult, ImageBuffer } from "@/types";
 
 import * as tf from "@tensorflow/tfjs";
 
@@ -63,8 +63,6 @@ export function parseDetections(
   frameH: number,
   confThreshold?: number,
 ): DetectionResult | null {
-  // YOLOv8-OBB output: [1, 6, N] where channels are [cx, cy, w, h, angle, class_logit]
-  // Standard YOLOv8 output: [1, 5, N] where channels are [cx, cy, w, h, class_logit]
   const channels = outputShape[1];
   const numCandidates = outputShape[2];
   const hasAngle = channels >= 6;
@@ -180,31 +178,41 @@ function multiHeadToDetection(
   };
 }
 
-export function detectWithModel(canvas: HTMLCanvasElement): DetectionResult | null {
+function bufferToTensor(buf: ImageBuffer): tf.Tensor4D {
+  const { data, width, height } = buf;
+  const floats = new Float32Array(width * height * 3);
+  for (let i = 0; i < width * height; i++) {
+    const src = i * 4;
+    const dst = i * 3;
+    floats[dst] = data[src] / 255.0;
+    floats[dst + 1] = data[src + 1] / 255.0;
+    floats[dst + 2] = data[src + 2] / 255.0;
+  }
+  return tf.tensor4d(floats, [1, height, width, 3]);
+}
+
+export function detectWithModel(buf: ImageBuffer): DetectionResult | null {
   if (!model) return null;
 
   let result: DetectionResult | null = null;
 
   tf.tidy(() => {
-    const input = tf.browser
-      .fromPixels(canvas)
-      .resizeBilinear([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE])
-      .toFloat()
-      .div(255.0)
-      .expandDims(0);
+    const resized = buf.width === MODEL_INPUT_SIZE && buf.height === MODEL_INPUT_SIZE
+      ? bufferToTensor(buf)
+      : bufferToTensor(buf).resizeBilinear([MODEL_INPUT_SIZE, MODEL_INPUT_SIZE]);
 
-    const pred = runModelPrediction(model!, input);
+    const pred = runModelPrediction(model!, resized);
 
     const multiHead = parseMultiHeadOutput(pred);
     if (multiHead) {
-      result = multiHeadToDetection(multiHead, canvas.width, canvas.height);
+      result = multiHeadToDetection(multiHead, buf.width, buf.height);
       return;
     }
 
     const singleTensor = pred as tf.Tensor;
     const data = singleTensor.dataSync();
     const shape = singleTensor.shape;
-    result = parseDetections(data, shape as number[], canvas.width, canvas.height);
+    result = parseDetections(data, shape as number[], buf.width, buf.height);
   });
 
   return result;

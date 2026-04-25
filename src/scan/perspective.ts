@@ -1,6 +1,4 @@
-import type { Point } from "@/types";
-
-import { getOrCreateCanvas } from "@/utils/canvas";
+import type { ImageBuffer, Point } from "@/types";
 
 export function solveHomography(src: Point[], dst: Point[]): number[] {
   if (src.length !== 4 || dst.length !== 4) {
@@ -80,10 +78,10 @@ export function invertHomography(H: number[]): number[] {
 }
 
 export function warpPerspective(
-  srcCanvas: HTMLCanvasElement,
+  src: ImageBuffer,
   srcCorners: Point[],
   outputSize: number,
-): HTMLCanvasElement {
+): ImageBuffer {
   const dstCorners: Point[] = [
     { x: 0, y: 0 },
     { x: outputSize, y: 0 },
@@ -92,26 +90,15 @@ export function warpPerspective(
   ];
 
   const H = solveHomography(dstCorners, srcCorners);
-  const h0 = H[0],
-    h1 = H[1],
-    h2 = H[2];
-  const h3 = H[3],
-    h4 = H[4],
-    h5 = H[5];
-  const h6 = H[6],
-    h7 = H[7],
-    h8 = H[8];
+  const h0 = H[0], h1 = H[1], h2 = H[2];
+  const h3 = H[3], h4 = H[4], h5 = H[5];
+  const h6 = H[6], h7 = H[7], h8 = H[8];
 
-  const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true })!;
-  const srcPixels = srcCtx.getImageData(0, 0, srcCanvas.width, srcCanvas.height).data;
-  const srcW = srcCanvas.width;
-  const srcH = srcCanvas.height;
+  const srcPixels = src.data;
+  const srcW = src.width;
+  const srcH = src.height;
 
-  const { canvas, ctx } = getOrCreateCanvas(outputSize, "warpPerspective", {
-    willReadFrequently: true,
-  });
-  const outData = ctx.createImageData(outputSize, outputSize);
-  const out = outData.data;
+  const out = new Uint8ClampedArray(outputSize * outputSize * 4);
 
   for (let dy = 0; dy < outputSize; dy++) {
     for (let dx = 0; dx < outputSize; dx++) {
@@ -154,8 +141,7 @@ export function warpPerspective(
     }
   }
 
-  ctx.putImageData(outData, 0, 0);
-  return canvas;
+  return { data: out, width: outputSize, height: outputSize };
 }
 
 export function estimateCircleCorners(

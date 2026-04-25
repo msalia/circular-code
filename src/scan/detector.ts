@@ -1,4 +1,4 @@
-import type { DetectionResult } from "@/types";
+import type { DetectionResult, ImageBuffer } from "@/types";
 
 import { toGrayscale } from "@/utils/image";
 
@@ -11,21 +11,8 @@ for (let t = 0; t < HOUGH_ANGLES; t++) {
   sinTable[t] = Math.sin(angle);
 }
 
-export function detectCircle(frame: HTMLCanvasElement): DetectionResult {
-  const ctx = frame.getContext("2d", { willReadFrequently: true });
-  if (!ctx) {
-    return {
-      cx: frame.width / 2,
-      cy: frame.height / 2,
-      r: Math.min(frame.width, frame.height) * 0.4,
-      confidence: 0,
-    };
-  }
-
-  const width = frame.width;
-  const height = frame.height;
-  const data = ctx.getImageData(0, 0, width, height).data;
-
+export function detectCircle(buf: ImageBuffer): DetectionResult {
+  const { data, width, height } = buf;
   const gray = toGrayscale(data, width * height);
   const edges = sobelEdgeDetect(gray, width, height);
   return houghCircleDetect(edges, width, height);

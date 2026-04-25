@@ -4,12 +4,9 @@ import { getTotalSegments } from "@/core/layout";
 import { renderSVG } from "@/render/svgRenderer";
 import { renderCanvas } from "@/render/canvasRenderer";
 import { getRingRadius, getSegmentsForRing, getSegmentAngle, isDataRing } from "@/core/layout";
-import { loadModel, isModelLoaded, detectWithModel } from "@/ml/detector";
-import { detectCircle } from "@/scan/detector";
-import { estimateCircleCorners, warpPerspective } from "@/scan/perspective";
-import { samplePolarGrid } from "@/scan/sampler";
-import { validateCircularCode } from "@/scan/validator";
-import { captureFrame } from "@/utils/image";
+import { loadModel, isModelLoaded } from "@/ml/detector";
+import { scanFrame } from "@/scan";
+import { bufferToCanvas } from "@/utils/image";
 import type { EncodedCode } from "@/types";
 
 let lastCode: EncodedCode | null = null;
@@ -52,8 +49,7 @@ function generate() {
 
     const decoded = decode(code.bits, eccBytes);
     decodeResult.textContent = decoded;
-    decodeResult.className =
-      "decode-result " + (decoded === text ? "success" : "error");
+    decodeResult.className = "decode-result " + (decoded === text ? "success" : "error");
 
     const totalBits = code.bits.length;
     const dataBits = totalBits - eccBytes * 8;
@@ -114,12 +110,11 @@ const scanBtn = document.getElementById("scan-btn") as HTMLButtonElement;
 const stopScanBtn = document.getElementById("stop-scan-btn") as HTMLButtonElement;
 const scanVideo = document.getElementById("scan-video") as HTMLVideoElement;
 const scanStatus = document.getElementById("scan-status") as HTMLDivElement;
-const scanResult = document.getElementById("scan-result") as HTMLDivElement;
+const scanResultEl = document.getElementById("scan-result") as HTMLDivElement;
 
 let stream: MediaStream | null = null;
 let scanning = false;
 let paused = false;
-let useMLModel = true;
 let frameCount = 0;
 let decodeCount = 0;
 const resumeBtn = document.getElementById("resume-btn") as HTMLButtonElement;
@@ -162,8 +157,8 @@ async function startScan() {
       modelStatus.textContent = "Model: loaded";
       modelStatus.style.color = "#6cbf6c";
     }
-    scanResult.textContent = "";
-    scanResult.className = "decode-result";
+    scanResultEl.textContent = "";
+    scanResultEl.className = "decode-result";
     scanLoop();
   } catch (e: any) {
     scanStatus.textContent = `Camera error: ${e.message}`;
@@ -176,8 +171,8 @@ function resumeScan() {
   paused = false;
   scanVideo.play();
   resumeBtn.style.display = "none";
-  scanResult.textContent = "";
-  scanResult.className = "decode-result";
+  scanResultEl.textContent = "";
+  scanResultEl.className = "decode-result";
   scanStatus.textContent = "Scanning...";
   scanStatus.className = "scan-status active";
   scanLoop();
@@ -195,8 +190,15 @@ function scanLoop() {
     return;
   }
   lastScanTime = now;
-
   frameCount++;
+
+  const rings = parseInt(optRings.value);
+  const segmentsPerRing = parseInt(optSegments.value);
+  const eccBytes = parseInt(optEcc.value);
+
+  const result = scanFrame(scanVideo, { rings, segmentsPerRing, eccBytes });
+
+  // --- Debug overlay ---
   const overlay = document.getElementById("scan-overlay") as HTMLCanvasElement;
   const videoW = scanVideo.videoWidth || scanVideo.clientWidth;
   const videoH = scanVideo.videoHeight || scanVideo.clientHeight;
@@ -205,143 +207,115 @@ function scanLoop() {
   const octx = overlay.getContext("2d")!;
   octx.clearRect(0, 0, overlay.width, overlay.height);
 
-  // Draw center scan region guide
   const side = Math.min(videoW, videoH);
   const guideX = (videoW - side) / 2;
   const guideY = (videoH - side) / 2;
+  const scaleX = side / 320;
+
   octx.strokeStyle = "#ffffff30";
   octx.lineWidth = 2;
   octx.strokeRect(guideX, guideY, side, side);
 
-  const captureSize = 320;
-  const captured = captureFrame(scanVideo, captureSize);
-  const scaleX = side / captureSize;
-  const offsetX = guideX;
-  const offsetY = guideY;
-
-  const detection = (useMLModel && isModelLoaded())
-    ? detectWithModel(captured) ?? detectCircle(captured)
-    : detectCircle(captured);
-
-  octx.strokeStyle = detection.confidence > 0.9 ? "#00ff00" : detection.confidence > 0.5 ? "#ffff00" : "#ff0000";
+  const det = result.detection;
+  octx.strokeStyle =
+    det.confidence > 0.9 ? "#00ff00" : det.confidence > 0.5 ? "#ffff00" : "#ff0000";
   octx.lineWidth = 3;
   octx.beginPath();
-  octx.arc(
-    offsetX + detection.cx * scaleX,
-    offsetY + detection.cy * scaleX,
-    detection.r * scaleX,
-    0, Math.PI * 2,
-  );
+  octx.arc(guideX + det.cx * scaleX, guideY + det.cy * scaleX, det.r * scaleX, 0, Math.PI * 2);
   octx.stroke();
 
-  if (detection.corners && detection.corners.length === 4) {
+  if (det.corners && det.corners.length === 4) {
     octx.strokeStyle = "#00ffff";
     octx.lineWidth = 2;
     octx.beginPath();
-    const c = detection.corners;
-    octx.moveTo(offsetX + c[0].x * scaleX, offsetY + c[0].y * scaleX);
-    for (let ci = 1; ci < 4; ci++) {
-      octx.lineTo(offsetX + c[ci].x * scaleX, offsetY + c[ci].y * scaleX);
+    octx.moveTo(guideX + det.corners[0].x * scaleX, guideY + det.corners[0].y * scaleX);
+    for (let i = 1; i < 4; i++) {
+      octx.lineTo(guideX + det.corners[i].x * scaleX, guideY + det.corners[i].y * scaleX);
     }
     octx.closePath();
     octx.stroke();
-    for (let ci = 0; ci < 4; ci++) {
+    for (const c of det.corners) {
       octx.fillStyle = "#00ffff";
       octx.beginPath();
-      octx.arc(offsetX + c[ci].x * scaleX, offsetY + c[ci].y * scaleX, 4, 0, Math.PI * 2);
+      octx.arc(guideX + c.x * scaleX, guideY + c.y * scaleX, 4, 0, Math.PI * 2);
       octx.fill();
     }
   }
 
-  octx.fillStyle = detection.confidence > 0.5 ? "#00ff00" : "#ff0000";
+  octx.fillStyle = det.confidence > 0.5 ? "#00ff00" : "#ff0000";
   octx.font = "14px monospace";
-  const angleDeg = detection.angle != null ? ` ang: ${(detection.angle * 180 / Math.PI).toFixed(0)}` : "";
-  const orientDeg = detection.orientation != null ? ` ori: ${(detection.orientation * 180 / Math.PI).toFixed(0)}` : "";
-  const reflTag = detection.reflected ? " REFLECTED" : "";
+  const ang = det.angle != null ? ` ang:${((det.angle * 180) / Math.PI).toFixed(0)}` : "";
+  const ori =
+    det.orientation != null ? ` ori:${((det.orientation * 180) / Math.PI).toFixed(0)}` : "";
+  const ref = det.reflected ? " REFLECTED" : "";
   octx.fillText(
-    `conf: ${(detection.confidence * 100).toFixed(0)}% r: ${detection.r.toFixed(0)} (${detection.cx.toFixed(0)},${detection.cy.toFixed(0)})${angleDeg}${orientDeg}${reflTag}`,
-    8, 20,
+    `conf:${(det.confidence * 100).toFixed(0)}% r:${det.r.toFixed(0)} (${det.cx.toFixed(0)},${det.cy.toFixed(0)})${ang}${ori}${ref}`,
+    8,
+    20,
   );
 
-  // Show warp debug
+  // Debug warp canvas
   const debugCanvas = document.getElementById("debug-warp") as HTMLCanvasElement;
-  const debugCtx = debugCanvas.getContext("2d", { willReadFrequently: true })!;
-  const codeSize = 300;
+  const codeSize = result.rectified.width;
   if (debugCanvas.width !== codeSize) debugCanvas.width = codeSize;
   if (debugCanvas.height !== codeSize) debugCanvas.height = codeSize;
+  const debugCtx = debugCanvas.getContext("2d", { willReadFrequently: true })!;
+  const rectifiedCanvas = bufferToCanvas(result.rectified);
+  debugCtx.drawImage(rectifiedCanvas, 0, 0);
 
-  const useDet = detection.confidence >= 0.5;
-  let srcCorners;
-  if (useDet && detection.corners && detection.corners.length === 4) {
-    srcCorners = detection.corners;
-  } else {
-    const warpCx = useDet ? detection.cx : captureSize / 2;
-    const warpCy = useDet ? detection.cy : captureSize / 2;
-    const warpR = useDet ? detection.r : captureSize * 0.35;
-    const warpAngle = useDet ? (detection.angle ?? 0) : 0;
-    srcCorners = estimateCircleCorners(warpCx, warpCy, warpR, 1.15, warpAngle);
-  }
-  const warped = warpPerspective(captured, srcCorners, codeSize);
-  debugCtx.drawImage(warped, 0, 0);
-
-  const rings = parseInt(optRings.value);
-  const segmentsPerRing = parseInt(optSegments.value);
-  const bits = samplePolarGrid(warped, codeSize / 2, codeSize / 2, codeSize, rings, segmentsPerRing);
   let bitIdx = 0;
   for (let r = 0; r < rings; r++) {
     if (!isDataRing(r)) continue;
     const segs = getSegmentsForRing(r, rings, segmentsPerRing);
     const radius = getRingRadius(r, rings, codeSize);
     for (let s = 0; s < segs; s++) {
-      const bit = bits[bitIdx++] ?? 0;
+      const bit = result.bits[bitIdx++] ?? 0;
       const angle = getSegmentAngle(s, segs);
-      const x = codeSize / 2 + radius * Math.cos(angle);
-      const y = codeSize / 2 + radius * Math.sin(angle);
       debugCtx.fillStyle = bit ? "#00ff00" : "#ff000080";
       debugCtx.beginPath();
-      debugCtx.arc(x, y, 2, 0, Math.PI * 2);
+      debugCtx.arc(
+        codeSize / 2 + radius * Math.cos(angle),
+        codeSize / 2 + radius * Math.sin(angle),
+        2,
+        0,
+        Math.PI * 2,
+      );
       debugCtx.fill();
     }
   }
 
-  const eccBytes = parseInt(optEcc.value);
-  const validation = validateCircularCode(warped, rings, codeSize);
-  let stage = useDet ? "detected" : "center-crop";
-
-  octx.fillStyle = validation.valid ? "#00ff0080" : "#ff000040";
+  const v = result.validation;
+  octx.fillStyle = v.valid ? "#00ff0080" : "#ff000040";
   octx.font = "12px monospace";
   octx.fillText(
-    `valid: ${validation.valid ? "YES" : "no"} (${validation.score.toFixed(2)}) dot:${validation.centerDot ? "Y" : "n"} ring:${validation.ringContrast ? "Y" : "n"} seg:${validation.segmentPattern ? "Y" : "n"}`,
-    8, videoH - 8,
+    `valid:${v.valid ? "YES" : "no"} (${v.score.toFixed(2)}) dot:${v.centerDot ? "Y" : "n"} ring:${v.ringContrast ? "Y" : "n"} seg:${v.segmentPattern ? "Y" : "n"}`,
+    8,
+    videoH - 8,
   );
 
-  if (validation.valid) {
-    try {
-      const decoded = decode(bits, eccBytes);
-      decodeCount++;
-      scanResult.textContent = decoded;
-      scanResult.className = "decode-result success";
-      scanStatus.textContent = `Decoded: "${decoded}"`;
-      scanStatus.className = "scan-status active";
-      octx.fillStyle = "#00ff00";
-      octx.font = "14px monospace";
-      octx.fillText(`DECODED: ${decoded}`, 8, 40);
+  // --- Result handling ---
+  if (result.decoded) {
+    decodeCount++;
+    scanResultEl.textContent = result.decoded;
+    scanResultEl.className = "decode-result success";
+    scanStatus.textContent = `Decoded: "${result.decoded}"`;
+    scanStatus.className = "scan-status active";
+    octx.fillStyle = "#00ff00";
+    octx.font = "14px monospace";
+    octx.fillText(`DECODED: ${result.decoded}`, 8, 40);
 
-      paused = true;
-      scanVideo.pause();
-      resumeBtn.style.display = "inline-block";
-      return;
-    } catch (e: any) {
-      stage += ` | ${e.message.slice(0, 50)}`;
-    }
-  } else {
-    stage += " | not a circular code";
+    paused = true;
+    scanVideo.pause();
+    resumeBtn.style.display = "inline-block";
+    return;
   }
 
+  const stage = result.detected ? "detected" : "center-crop";
+  const detail = result.error ? ` | ${result.error.slice(0, 50)}` : "";
   octx.fillStyle = "#ffffff";
   octx.font = "14px monospace";
-  octx.fillText(`f:${frameCount} | ${stage}`, 8, 40);
-  scanStatus.textContent = `f:${frameCount} | ${stage}`;
+  octx.fillText(`f:${frameCount} | ${stage}${detail}`, 8, 40);
+  scanStatus.textContent = `f:${frameCount} | ${stage}${detail}`;
 
   requestAnimationFrame(scanLoop);
 }
@@ -366,6 +340,4 @@ function stopScan() {
 scanBtn.addEventListener("click", startScan);
 stopScanBtn.addEventListener("click", stopScan);
 resumeBtn.addEventListener("click", resumeScan);
-(document.getElementById("toggle-ml") as HTMLInputElement).addEventListener("change", (e) => {
-  useMLModel = (e.target as HTMLInputElement).checked;
-});
+(document.getElementById("toggle-ml") as HTMLInputElement).addEventListener("change", () => {});

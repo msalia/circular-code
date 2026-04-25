@@ -5,12 +5,23 @@ export { rsDecode, rsEncode } from "@/ecc/reedSolomon";
 export { renderSVG } from "@/render/svgRenderer";
 export type { SVGRenderOptions } from "@/render/svgRenderer";
 export { renderCanvas } from "@/render/canvasRenderer";
-export { processFrame, scanFromVideo } from "@/scan";
+export {
+  detectCode,
+  flipHorizontal,
+  processFrame,
+  rectifyCode,
+  resolveCorners,
+  sampleAndDecode,
+  scanFrame,
+  scanFromVideo,
+} from "@/scan";
+export type { RectifyResult, ScanFrameOptions, ScanFrameResult } from "@/scan";
 export { MultiFrameConsensus } from "@/scan/consensus";
 export { scoreFrame } from "@/scan/frameScorer";
 export { validateCircularCode } from "@/scan/validator";
 export type { ValidationResult } from "@/scan/validator";
 export { estimateCircleCorners, solveHomography, warpPerspective } from "@/scan/perspective";
+export { samplePolarGrid } from "@/scan/sampler";
 export {
   detectWithModel,
   getLoadedModel,
@@ -22,7 +33,14 @@ export {
   runModelPrediction,
 } from "@/ml/detector";
 export { getOrCreateCanvas } from "@/utils/canvas";
-export { toGrayscale } from "@/utils/image";
+export {
+  bufferToCanvas,
+  canvasToBuffer,
+  captureFrameToBuffer,
+  createBuffer,
+  flipBufferHorizontal,
+  toGrayscale,
+} from "@/utils/image";
 export { useCircularScanner } from "@/react/useCircularScanner";
 export type {
   CircularCodeOptions,
@@ -30,6 +48,7 @@ export type {
   DetectionResult,
   EncodedCode,
   FrameScore,
+  ImageBuffer,
   Point,
   ScanOptions,
   ScanResult,

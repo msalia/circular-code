@@ -1,20 +1,17 @@
+import type { ImageBuffer } from "@/types";
+
 import { getRingRadius, getSegmentAngle, getSegmentsForRing, isDataRing } from "@/core/layout";
 
 export function samplePolarGrid(
-  frame: HTMLCanvasElement,
+  frame: ImageBuffer,
   cx: number,
   cy: number,
   codeSize: number,
   rings = 5,
   segmentsPerRing = 48,
+  orientationOffset = 0,
 ): number[] {
-  const ctx = frame.getContext("2d", { willReadFrequently: true });
-  if (!ctx) {
-    throw new Error("Unable to sample frame: canvas context unavailable.");
-  }
-
-  const { width, height } = frame;
-  const data = ctx.getImageData(0, 0, width, height).data;
+  const { data, width, height } = frame;
   const bits: number[] = [];
 
   for (let r = 0; r < rings; r++) {
@@ -22,7 +19,7 @@ export function samplePolarGrid(
     const segs = getSegmentsForRing(r, rings, segmentsPerRing);
     const sampleRadius = getRingRadius(r, rings, codeSize);
     for (let segment = 0; segment < segs; segment++) {
-      const angle = getSegmentAngle(segment, segs);
+      const angle = getSegmentAngle(segment, segs) + orientationOffset;
       const x = Math.round(cx + sampleRadius * Math.cos(angle));
       const y = Math.round(cy + sampleRadius * Math.sin(angle));
       if (x < 0 || x >= width || y < 0 || y >= height) {
