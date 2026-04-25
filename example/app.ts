@@ -367,4 +367,3 @@ function stopScan() {
 scanBtn.addEventListener("click", startScan);
 stopScanBtn.addEventListener("click", stopScan);
 resumeBtn.addEventListener("click", resumeScan);
-(document.getElementById("toggle-ml") as HTMLInputElement).addEventListener("change", () => {});
