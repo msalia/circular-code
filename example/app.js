@@ -75445,7 +75445,11 @@ return a / b;`;
     return model2 !== null;
   }
   function runModelPrediction(mdl, input2) {
-    return mdl.predict(input2);
+    const pred = mdl.predict(input2);
+    if (Array.isArray(pred)) return pred[0];
+    if (pred instanceof Tensor) return pred;
+    const values = Object.values(pred);
+    return values[0];
   }
   function sigmoid4(x2) {
     return 1 / (1 + Math.exp(-x2));
@@ -75453,9 +75457,12 @@ return a / b;`;
   function parseDetections(outputData, outputShape, frameW, frameH, confThreshold) {
     const channels = outputShape[1];
     const numCandidates = outputShape[2];
-    const hasAngle = channels >= 6;
-    const confChannel = hasAngle ? 5 : 4;
     const threshold3 = confThreshold ?? 0.5;
+    const extraChannels = channels - 5;
+    const hasPose = extraChannels >= 3 && extraChannels % 3 === 0;
+    const hasAngle = !hasPose && channels === 6;
+    const confChannel = hasAngle ? 5 : 4;
+    const numKeypoints = hasPose ? extraChannels / 3 : 0;
     let bestConf = threshold3;
     let bestIdx = -1;
     for (let i = 0; i < numCandidates; i++) {
@@ -75480,6 +75487,18 @@ return a / b;`;
     };
     if (hasAngle) {
       result.angle = outputData[4 * numCandidates + bestIdx];
+    }
+    if (hasPose && numKeypoints >= 4) {
+      const corners = [];
+      for (let kp = 0; kp < 4; kp++) {
+        const xCh = 5 + kp * 3;
+        const yCh = 6 + kp * 3;
+        corners.push({
+          x: outputData[xCh * numCandidates + bestIdx] * scaleX,
+          y: outputData[yCh * numCandidates + bestIdx] * scaleY
+        });
+      }
+      result.corners = corners;
     }
     return result;
   }
@@ -75725,48 +75744,48 @@ return a / b;`;
         samples[i] = 128;
       }
     }
-    const median = computeMedian(samples);
-    const binaryPattern = new Uint8Array(numSamples);
-    for (let i = 0; i < numSamples; i++) {
-      binaryPattern[i] = samples[i] < median ? 1 : 0;
+    let bgSum = 0;
+    let bgCount = 0;
+    const bgRadius = radius * 0.5;
+    for (let a = 0; a < 8; a++) {
+      const angle = a / 8 * Math.PI * 2;
+      const x2 = Math.round(cx + bgRadius * Math.cos(angle));
+      const y = Math.round(cy + bgRadius * Math.sin(angle));
+      if (x2 >= 0 && x2 < width && y >= 0 && y < height) {
+        bgSum += gray[y * width + x2];
+        bgCount++;
+      }
     }
-    const expectedSpans = arcs.map((a) => a.end - a.start);
-    const totalExpected = expectedSpans.reduce((s, v) => s + v, 0);
-    const gapAngle = arcs.length > 1 ? arcs[1].start - arcs[0].end : Math.PI / 18;
-    let bestAngle = 0;
+    const bgLevel = bgCount > 0 ? bgSum / bgCount : 200;
+    const sorted = Array.from(samples).sort((a, b) => a - b);
+    const darkLevel = sorted[Math.floor(numSamples * 0.1)];
+    const threshold3 = (darkLevel + bgLevel) / 2;
+    const dark = new Uint8Array(numSamples);
+    for (let i = 0; i < numSamples; i++) {
+      dark[i] = samples[i] < threshold3 ? 1 : 0;
+    }
+    const expectedDark = buildExpectedPattern(arcs, numSamples, false);
+    const expectedDarkRefl = buildExpectedPattern(arcs, numSamples, true);
     let bestScore = -1;
+    let bestAngle = 0;
     let bestReflected = false;
-    for (let reflected = 0; reflected <= 1; reflected++) {
-      const spans = reflected ? [...expectedSpans].reverse() : expectedSpans;
-      for (let offset = 0; offset < numSamples; offset++) {
-        let score = 0;
-        let cursor = offset;
-        for (let arcIdx = 0; arcIdx < spans.length; arcIdx++) {
-          const arcSamples = Math.round(spans[arcIdx] / (Math.PI * 2) * numSamples);
-          for (let j = 0; j < arcSamples; j++) {
-            const idx = (cursor + j) % numSamples;
-            if (binaryPattern[idx] === 1) score++;
-          }
-          cursor += arcSamples;
-          const gapSamples = Math.round(gapAngle / (Math.PI * 2) * numSamples);
-          for (let j = 0; j < gapSamples; j++) {
-            const idx = (cursor + j) % numSamples;
-            if (binaryPattern[idx] === 0) score++;
-          }
-          cursor += gapSamples;
-        }
-        const remainingSamples = numSamples - (cursor - offset);
-        if (remainingSamples > 0) {
-          for (let j = 0; j < remainingSamples; j++) {
-            const idx = (cursor + j) % numSamples;
-            if (binaryPattern[idx] === 0) score++;
-          }
-        }
-        if (score > bestScore) {
-          bestScore = score;
-          bestAngle = offset / numSamples * Math.PI * 2;
-          bestReflected = reflected === 1;
-        }
+    for (let offset = 0; offset < numSamples; offset++) {
+      let score = 0;
+      let scoreRefl = 0;
+      for (let i = 0; i < numSamples; i++) {
+        const si = (i + offset) % numSamples;
+        if (dark[si] === expectedDark[i]) score++;
+        if (dark[si] === expectedDarkRefl[i]) scoreRefl++;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestAngle = offset / numSamples * Math.PI * 2;
+        bestReflected = false;
+      }
+      if (scoreRefl > bestScore) {
+        bestScore = scoreRefl;
+        bestAngle = offset / numSamples * Math.PI * 2;
+        bestReflected = true;
       }
     }
     return {
@@ -75775,10 +75794,18 @@ return a / b;`;
       confidence: bestScore / numSamples
     };
   }
-  function computeMedian(arr) {
-    const sorted = Array.from(arr).sort((a, b) => a - b);
-    const mid = sorted.length >> 1;
-    return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+  function buildExpectedPattern(arcs, numSamples, reflected) {
+    const pattern = new Uint8Array(numSamples);
+    const src = reflected ? [...arcs].reverse() : arcs;
+    for (const arc of src) {
+      const span = arc.end - arc.start;
+      const startIdx = reflected ? Math.round((2 * Math.PI - arc.end) / (Math.PI * 2) * numSamples) : Math.round(arc.start / (Math.PI * 2) * numSamples);
+      const count2 = Math.round(span / (Math.PI * 2) * numSamples);
+      for (let i = 0; i < count2; i++) {
+        pattern[(startIdx + i + numSamples) % numSamples] = 1;
+      }
+    }
+    return pattern;
   }
 
   // ../src/scan/perspective.ts

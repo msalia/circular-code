@@ -59,14 +59,17 @@ function loadLabel(index: number, split: "train" | "val"): { hasObject: boolean;
 
   const parts = raw.split(/\s+/).map(Number);
 
+  // YOLO-Pose: class cx cy w h kp1x kp1y kp1v ... (17 fields for 4 kps)
+  // Standard YOLO: class cx cy w h (5 fields)
+  if (parts.length >= 5) {
+    return { hasObject: true, cx: parts[1], cy: parts[2] };
+  }
+
+  // OBB: class x1 y1 x2 y2 x3 y3 x4 y4 (9 fields)
   if (parts.length === 9) {
     const cx = (parts[1] + parts[3] + parts[5] + parts[7]) / 4;
     const cy = (parts[2] + parts[4] + parts[6] + parts[8]) / 4;
     return { hasObject: true, cx, cy };
-  }
-
-  if (parts.length === 5) {
-    return { hasObject: true, cx: parts[1], cy: parts[2] };
   }
 
   return { hasObject: true, cx: 0.5, cy: 0.5 };

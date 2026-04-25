@@ -48,12 +48,16 @@ export function getLoadedModel(): tf.GraphModel | tf.LayersModel | null {
   return model;
 }
 
-/** Runs a model prediction on a tensor input. */
+/** Runs a model prediction on a tensor input and returns the primary output tensor. */
 export function runModelPrediction(
   mdl: tf.GraphModel | tf.LayersModel,
   input: tf.Tensor,
 ): tf.Tensor {
-  return mdl.predict(input) as tf.Tensor;
+  const pred = mdl.predict(input);
+  if (Array.isArray(pred)) return pred[0];
+  if (pred instanceof tf.Tensor) return pred;
+  const values = Object.values(pred as Record<string, tf.Tensor>);
+  return values[0];
 }
 
 function sigmoid(x: number): number {
@@ -72,13 +76,16 @@ export function parseDetections(
   const numCandidates = outputShape[2];
   const threshold = confThreshold ?? 0.5;
 
-  // Determine format:
+  // Determine format by channel count:
   // Standard YOLO:     [1, 5, N] = cx, cy, w, h, class
   // YOLO-OBB:          [1, 6, N] = cx, cy, w, h, angle, class
-  // YOLO-Pose (4 kps): [1, 17, N] = cx, cy, w, h, class, kp1x, kp1y, kp1c, ...kp4c
-  const hasPose = channels >= 17;
-  const hasAngle = !hasPose && channels >= 6;
+  // YOLO-Pose (4 kps): [1, 17, N] = cx, cy, w, h, class, 4*(x,y,conf)
+  // Pose channels = 5 + numKeypoints*3, where numKeypoints*3 is divisible by 3
+  const extraChannels = channels - 5;
+  const hasPose = extraChannels >= 3 && extraChannels % 3 === 0;
+  const hasAngle = !hasPose && channels === 6;
   const confChannel = hasAngle ? 5 : 4;
+  const numKeypoints = hasPose ? extraChannels / 3 : 0;
 
   let bestConf = threshold;
   let bestIdx = -1;
@@ -112,13 +119,14 @@ export function parseDetections(
     result.angle = outputData[4 * numCandidates + bestIdx];
   }
 
-  if (hasPose) {
+  if (hasPose && numKeypoints >= 4) {
     const corners = [];
     for (let kp = 0; kp < 4; kp++) {
-      const kpBase = (5 + kp * 3) * numCandidates + bestIdx;
+      const xCh = 5 + kp * 3;
+      const yCh = 6 + kp * 3;
       corners.push({
-        x: outputData[kpBase] * scaleX,
-        y: outputData[kpBase + numCandidates] * scaleY,
+        x: outputData[xCh * numCandidates + bestIdx] * scaleX,
+        y: outputData[yCh * numCandidates + bestIdx] * scaleY,
       });
     }
     result.corners = corners;

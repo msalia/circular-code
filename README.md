@@ -1,6 +1,6 @@
 # Circular Code
 
-A custom circular barcode system written in TypeScript. Encodes arbitrary text into concentric ring patterns, renders them as SVG or Canvas, and decodes them back from camera video using a combination of geometric detection and ML-assisted recognition.
+A custom circular barcode system written in TypeScript. Encodes arbitrary text into concentric ring patterns, renders them as SVG or Canvas, and decodes them back from camera video using ML detection, perspective correction, and algorithmic orientation analysis.
 
 Not Apple-compatible — this is an independent format with its own encoding, error correction, and scanning pipeline.
 
@@ -9,12 +9,12 @@ Not Apple-compatible — this is an independent format with its own encoding, er
 - **Encoding/Decoding** — Text to circular bit pattern and back, with configurable rings and segments
 - **Adaptive ring layout** — Inner rings hold fewer segments proportional to circumference, preventing visual overlap
 - **Reed-Solomon ECC** — Real GF(256) error correction that recovers data from damaged codes
-- **Orientation ring** — Outer ring with an asymmetric arc pattern (180/90/45) for unambiguous rotation and 3D tilt detection
+- **Orientation ring** — Outer ring with an asymmetric arc pattern (180°/90°/45°) for unambiguous rotation and reflection detection
 - **Dual-color SVG rendering** — Primary color for data arcs, secondary color for non-data segments with configurable gap separation
 - **Canvas rendering** — Delegates to SVG renderer for consistent output across both render paths
-- **Multi-head ML detection** — Custom MobileNetV2-based model predicts presence, geometry, corner keypoints, orientation, and reflection in a single forward pass
-- **Reflection detection** — Model identifies mirror-reflected codes and the scanner auto-flips before decoding
-- **Perspective correction** — Model-predicted corner keypoints feed directly into homography for accurate dewarping
+- **YOLO-Pose detection** — YOLOv8-Pose model predicts bounding box + 4 corner keypoints for direct perspective correction
+- **Algorithmic orientation analysis** — Samples the orientation ring pattern to determine rotation angle and detect mirror reflections without ML
+- **Canvas-free processing** — Internal pipeline uses raw `ImageBuffer` arrays, no DOM dependency for scan logic
 - **Frame scoring** — Laplacian sharpness + contrast scoring to pick the best video frames
 - **Multi-frame consensus** — Weighted majority voting across frames for reliable scanning
 - **React hook** — `useCircularScanner()` for drop-in camera scanning in React apps
@@ -26,11 +26,11 @@ src/
   core/           Encoder, decoder, bitstream, layout math (including orientation ring geometry)
   ecc/            GF(256) arithmetic and Reed-Solomon codec
   render/         SVG renderer (primary) and Canvas renderer (delegates to SVG)
-  scan/           Detection, sampling, perspective correction, frame scoring, consensus
-  ml/             TensorFlow.js model loader, multi-head and legacy YOLO inference
+  scan/           Detection, orientation analysis, sampling, perspective correction, consensus
+  ml/             TensorFlow.js model loader, YOLO detection/pose inference
   react/          useCircularScanner hook
-  utils/          Canvas caching, image capture, grayscale conversion
-  types.ts        Shared type definitions
+  utils/          ImageBuffer operations, canvas conversion, grayscale, math helpers
+  types.ts        Shared type definitions (ImageBuffer, DetectionResult, etc.)
   index.ts        Public API exports
 
 scripts/
@@ -38,14 +38,14 @@ scripts/
   resolve-aliases.js   Post-build path alias resolver
 
 training/
-  train.py             Multi-head model training and TF.js export (TensorFlow/Keras)
+  train.py             YOLOv8-Pose training and TF.js export (ultralytics)
   requirements.txt     Python dependencies
   setup_venv.sh        Virtual environment setup script
 
-tests/                 Vitest unit and integration tests (90+ tests)
+tests/                 Vitest unit and integration tests (211 tests)
 models/circular_code/  Trained TF.js model output
-dataset/               Generated training images and labels
-example/               Browser demo app (esbuild + local server)
+dataset/               Generated training images and labels (YOLO-Pose format)
+example/               Browser demo app with pipeline debug view
 ```
 
 ## Quick Start
@@ -70,7 +70,7 @@ Compiles TypeScript to `dist/` and resolves `@/` path aliases for Node.js.
 npm test
 ```
 
-Runs 90+ tests covering bitstream, encoder/decoder roundtrips, Reed-Solomon error correction, layout geometry (including orientation ring), perspective math, multi-frame consensus, SVG rendering, multi-head detection parsing, reflection detection, and end-to-end flows. An additional model inference test suite validates detection accuracy against the dataset.
+Runs 211 tests across 19 test files covering: GF(256) arithmetic, bitstream, encoder/decoder roundtrips, Reed-Solomon error correction, layout geometry, orientation ring, SVG rendering, perspective math, polar grid sampling, validation, frame scoring, Hough detection, YOLO parsing (standard/OBB/Pose), orientation analysis, scan pipeline (corner resolution, flip, rectification), multi-frame consensus, image buffer operations, and end-to-end flows.
 
 ### Type Check
 
@@ -91,20 +91,16 @@ const code = encode("https://example.com", {
   eccBytes: 16,
 });
 
-// Basic rendering
-const svg = renderSVG(code, 300);
-
-// With color options
-const styledSvg = renderSVG(code, {
+const svg = renderSVG(code, {
   size: 400,
   primary: "#1a1a2e",
   secondary: "#e0ddd5",
 });
 
-document.getElementById("container").innerHTML = styledSvg;
+document.getElementById("container").innerHTML = svg;
 ```
 
-The rendered code includes an outer orientation ring with three asymmetric arcs (180, 90, 45) that allow the scanner to determine the code's rotation and detect mirror reflections.
+The rendered code includes an outer orientation ring with three asymmetric arcs (180°, 90°, 45°) that allow the scanner to determine the code's rotation and detect mirror reflections.
 
 ### Decode
 
@@ -112,6 +108,21 @@ The rendered code includes an outer orientation ring with three asymmetric arcs 
 import { decode } from "circular-code";
 
 const text = decode(bits, 16); // bits: number[], eccBytes: number
+```
+
+### Scan a Single Frame
+
+```typescript
+import { scanFrame } from "circular-code";
+
+const result = scanFrame(videoElement); // or pass a canvas or ImageBuffer
+
+if (result.decoded) {
+  console.log(result.decoded);          // the text
+  console.log(result.orientation);      // { angle, reflected, confidence }
+  console.log(result.detection);        // { cx, cy, r, corners, confidence }
+  console.log(result.validation);       // { valid, centerDot, ringContrast, segmentPattern, score }
+}
 ```
 
 ### Scan from Video (Browser)
@@ -150,21 +161,11 @@ function Scanner() {
 
 ## Training the ML Detector
 
-The detector uses a custom multi-head CNN built on MobileNetV2 that predicts everything the scanner needs in a single forward pass:
-
-| Head | Output | Activation | Description |
-|------|--------|------------|-------------|
-| **presence** | 1 value | sigmoid | Is there a circular code in the image? |
-| **geometry** | 3 values | sigmoid | Center (cx, cy) and radius, normalized 0-1 |
-| **corners** | 8 values | sigmoid | 4 keypoint coordinates for direct homography |
-| **orientation** | 2 values | tanh | sin/cos of the orientation ring angle |
-| **reflection** | 1 value | sigmoid | Is the code mirror-reflected? |
-
-Training uses synthetic data generated from the real SVG renderer with full 3D perspective transforms, random reflections, noise, and lighting variation.
+The detector uses a YOLOv8-Pose model that predicts a bounding box plus 4 corner keypoints for each detected code. The corner keypoints give the scanner the perspective-warped quadrilateral needed for accurate homography dewarping. Rotation and reflection are handled algorithmically by the orientation ring analyzer after rectification.
 
 ### Prerequisites
 
-Python 3.9+ with TensorFlow and tensorflowjs:
+Python 3.9+ with ultralytics:
 
 ```bash
 cd training
@@ -184,23 +185,27 @@ Produces 12,000 images (8,000 positive + 4,000 negative) with an 85/15 train/val
 - Randomly generated text (URLs, phrases, alphanumeric tokens, numbers)
 - Varied ring/segment configs (3-6 rings, 32/48/64 segments)
 - Full 3D perspective transforms (pitch, yaw, roll with focal-length projection)
-- ~40% horizontal reflection (simulating transparent/mirror viewing)
 - Dual-color rendering, noise, lighting gradients, blur, and background clutter
+
+Hard negative samples include concentric circles, bullseyes, spirals, clock faces, dashed rings, QR-like grids, and center-dot patterns.
 
 Output structure:
 ```
 dataset/
   images/train/    Training images (320x320 PNG)
   images/val/      Validation images
-  labels/train/    15-value labels per image
-  labels/val/      Validation labels
+  labels/train/    YOLO-Pose labels
+  labels/val/      Validation labels (empty file = no object)
+  data.yaml        YOLO dataset config with kpt_shape: [4, 3]
   manifest.json    Dataset metadata
 ```
 
-Label format (space-separated, normalized 0-1):
+Label format (YOLO-Pose, normalized 0-1):
 ```
-present cx cy radius c1x c1y c2x c2y c3x c3y c4x c4y sin_orient cos_orient reflected
+class cx cy w h kp1x kp1y kp1v kp2x kp2y kp2v kp3x kp3y kp3v kp4x kp4y kp4v
 ```
+
+The 4 keypoints are the perspective-warped corners of the code (top-left, top-right, bottom-right, bottom-left).
 
 ### Step 2: Train the Model
 
@@ -208,18 +213,15 @@ present cx cy radius c1x c1y c2x c2y c3x c3y c4x c4y sin_orient cos_orient refle
 python training/train.py
 ```
 
-Trains in two phases:
-1. **Frozen backbone** — MobileNetV2 weights locked, heads train for ~1/3 of epochs
-2. **Fine-tuning** — Upper backbone layers unfrozen, full model trains at reduced learning rate
-
-The model auto-exports to TF.js format at `models/circular_code/`.
+Trains a YOLOv8n-pose model on the synthetic dataset and auto-exports to TF.js format.
 
 Options:
 
 ```bash
-python training/train.py --epochs 80 --batch-size 32
+python training/train.py --epochs 40 --batch-size 32
 python training/train.py --dataset ./my_dataset --output ./my_model
-python training/train.py --lr 0.0005 --fine-tune-at 120
+python training/train.py --resume runs/pose/circular_code/weights/best.pt
+python training/train.py --base-model yolov8s-pose.pt  # larger model
 ```
 
 ### Step 3: Verify
@@ -230,7 +232,7 @@ Run the model accuracy test against the dataset:
 npx vitest run tests/model.test.ts
 ```
 
-This loads the TF.js model, runs inference on sampled positive/negative images, and checks classification accuracy (>=80%), geometry quality, and reflection prediction accuracy.
+This loads the TF.js model, runs inference on sampled positive/negative images, and checks classification accuracy (>=80%) and bounding box quality.
 
 ## End-to-End Cheat Sheet
 
@@ -246,7 +248,7 @@ cd training && bash setup_venv.sh && source venv/bin/activate && cd ..
 # Generate dataset and train
 npm run build
 npm run generate-dataset
-python training/train.py --epochs 80
+python training/train.py --epochs 40
 
 # Verify model quality
 npx vitest run tests/model.test.ts
@@ -287,17 +289,19 @@ Text -> UTF-8 bytes -> [version, length, ...data] header
 ### Scanning Pipeline
 
 ```
-Video frame -> Capture 320x320
-            -> ML detection (multi-head CNN):
-               - Presence: code detected?
-               - Geometry: cx, cy, radius
-               - Corners: 4 keypoints for homography
-               - Orientation: sin/cos of rotation angle
-               - Reflection: is the code mirrored?
-            -> Score frame (sharpness + contrast)
-            -> Perspective correction (homography from predicted corners)
+Video frame -> Capture to ImageBuffer (320x320)
+            -> YOLO-Pose detection:
+               - Bounding box: cx, cy, w, h
+               - 4 corner keypoints (perspective-warped quadrilateral)
+               - Confidence score
+            -> Homography from corner keypoints -> Rectified ImageBuffer
+            -> Orientation ring analysis (algorithmic):
+               - Samples grayscale values around orientation ring radius
+               - Correlates against known long/medium/short arc pattern
+               - Determines rotation angle and reflection state
             -> Flip if reflected
-            -> Polar grid sampling
+            -> Score frame (sharpness + contrast)
+            -> Polar grid sampling -> Bit extraction
             -> RS decode -> Multi-frame consensus -> Result
 
 Fallback: Hough circle detection + estimated corners (when model unavailable)
@@ -306,19 +310,24 @@ Fallback: Hough circle detection + estimated corners (when model unavailable)
 ### Model Architecture
 
 ```
-MobileNetV2 backbone (pretrained ImageNet, fine-tuned)
-  -> GlobalAveragePooling2D
-  -> Dense(256, relu) + Dropout(0.3)    [shared features]
-  -> Dense(64, relu)  -> Dense(1, sigmoid)    [presence]
-  -> Dense(128, relu) -> Dense(3, sigmoid)    [geometry: cx, cy, r]
-  -> Dense(128, relu) -> Dense(64, relu) -> Dense(8, sigmoid)  [corners]
-  -> Dense(64, relu)  -> Dense(2, tanh)       [orientation: sin, cos]
-  -> Dense(64, relu)  -> Dense(1, sigmoid)    [reflection]
-
+YOLOv8n-Pose (Keypoint Detection)
 Input: 320x320x3, normalized to [0, 1]
-Total outputs: 15 values
-Exported to TF.js LayersModel format
+Output: [1, 17, N] — N detection candidates
+  Per candidate:
+    [cx, cy, w, h]     — bounding box
+    [class_score]       — detection confidence
+    [kp1x, kp1y, kp1c] — top-left corner
+    [kp2x, kp2y, kp2c] — top-right corner
+    [kp3x, kp3y, kp3c] — bottom-right corner
+    [kp4x, kp4y, kp4c] — bottom-left corner
+
+Exported to TF.js GraphModel format via ultralytics
 ```
+
+The parser auto-detects output format and handles all three YOLO variants:
+- **Standard** (5 channels): cx, cy, w, h, class
+- **OBB** (6 channels): cx, cy, w, h, angle, class
+- **Pose** (5 + N×3 channels): cx, cy, w, h, class, keypoints
 
 ## API Reference
 
@@ -342,24 +351,50 @@ Exported to TF.js LayersModel format
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `scanFromVideo` | `(video: HTMLVideoElement, opts?: ScanOptions) => Promise<string>` | Scan video until decoded |
-| `processFrame` | `(video: HTMLVideoElement, opts?) => ScanResult \| null` | Process a single frame |
+| `scanFrame` | `(source: Video \| Canvas \| ImageBuffer, opts?) => ScanFrameResult` | One-call scan: detect, rectify, orient, sample, decode |
+| `scanFromVideo` | `(video: HTMLVideoElement, opts?: ScanOptions) => Promise<string>` | Scan video until decoded via multi-frame consensus |
+| `processFrame` | `(video: HTMLVideoElement, opts?) => ScanResult \| null` | Process a single frame, returns result if decoded |
+| `analyzeOrientation` | `(buf: ImageBuffer, rings, size) => OrientationAnalysis` | Determine rotation angle and reflection from orientation ring |
+| `rectifyCode` | `(frame, detection, rings, size?) => RectifyResult` | Warp, analyze orientation, flip if reflected, validate |
+| `detectCode` | `(buf: ImageBuffer) => DetectionResult` | Detect code via ML model or Hough fallback |
+| `resolveCorners` | `(detection, padding?) => Point[]` | Get corners from model keypoints or estimate from geometry |
 | `loadModel` | `(path?: string) => Promise<void>` | Load TF.js detection model |
-| `loadModelFromFiles` | `(json, specs, data) => Promise<void>` | Load model from buffers (Node.js) |
-| `parseDetections` | `(data, shape, frameW, frameH, threshold?) => DetectionResult \| null` | Parse legacy YOLO output tensor into a detection |
 
 ### Types
 
 ```typescript
+type ImageBuffer = {
+  data: Uint8ClampedArray;  // RGBA pixel data
+  width: number;
+  height: number;
+};
+
 type DetectionResult = {
-  cx: number;
-  cy: number;
-  r: number;
-  corners?: Point[];      // 4 keypoints from model for direct homography
+  cx: number;               // center x
+  cy: number;               // center y
+  r: number;                // radius
+  corners?: Point[];        // 4 keypoints from YOLO-Pose for homography
   confidence: number;
-  angle?: number;         // rotation angle (radians)
-  orientation?: number;   // orientation ring angle (radians)
-  reflected?: boolean;    // true if code is mirror-reflected
+  angle?: number;           // OBB rotation angle (radians)
+};
+
+type OrientationAnalysis = {
+  angle: number;            // orientation ring rotation (radians)
+  reflected: boolean;       // true if code is mirror-reflected
+  confidence: number;       // match quality 0-1
+};
+
+type ScanFrameResult = {
+  detected: boolean;        // was a code found?
+  decoded: string | null;   // decoded text or null
+  error: string | null;     // error message if decode failed
+  detection: DetectionResult;
+  orientation: OrientationAnalysis;
+  corners: Point[];         // corners used for homography
+  rectified: ImageBuffer;   // dewarped image
+  bits: number[];           // sampled bit values
+  validation: ValidationResult;
+  frameScore: FrameScore;
 };
 ```
 
@@ -367,16 +402,19 @@ type DetectionResult = {
 
 | Hook | Returns | Description |
 |------|---------|-------------|
-| `useCircularScanner` | `{ videoRef, result, scanning }` | Camera scanning hook with auto model loading, frame scoring, and consensus |
+| `useCircularScanner` | `{ videoRef, result, scanning }` | Camera scanning hook with model loading, frame scoring, and consensus |
 
 ### Utilities
 
 | Export | Description |
 |--------|-------------|
+| `createBuffer` | Create an empty ImageBuffer |
+| `canvasToBuffer` / `bufferToCanvas` | Convert between Canvas and ImageBuffer |
+| `captureFrameToBuffer` | Capture video frame as ImageBuffer |
+| `flipBufferHorizontal` | Mirror an ImageBuffer left-to-right |
+| `toGrayscale` | Fast integer-arithmetic luminance conversion |
 | `MultiFrameConsensus` | Rolling buffer with weighted majority voting |
 | `scoreFrame` | Frame quality scoring (sharpness + contrast) |
-| `solveHomography` | 4-point perspective transform solver |
-| `warpPerspective` | Apply perspective correction to canvas |
-| `estimateCircleCorners` | Compute rotated bounding corners from detection (cx, cy, r, padding, angle) |
-| `getOrCreateCanvas` | Cached canvas factory to avoid DOM thrashing |
-| `toGrayscale` | Fast integer-arithmetic luminance conversion |
+| `solveHomography` / `warpPerspective` | 4-point perspective transform |
+| `samplePolarGrid` | Sample bits from rectified image using polar coordinates |
+| `validateCircularCode` | Check center dot, ring contrast, segment patterns |
