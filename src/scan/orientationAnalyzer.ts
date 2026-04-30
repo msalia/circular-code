@@ -7,6 +7,7 @@ import { toGrayscale } from "@/utils/image";
 export type OrientationAnalysis = {
   angle: number;
   reflected: boolean;
+  inverted: boolean;
   confidence: number;
 };
 
@@ -36,23 +37,10 @@ export function analyzeOrientation(
     }
   }
 
-  let bgSum = 0;
-  let bgCount = 0;
-  const bgRadius = radius * 0.5;
-  for (let a = 0; a < 8; a++) {
-    const angle = (a / 8) * Math.PI * 2;
-    const x = Math.round(cx + bgRadius * Math.cos(angle));
-    const y = Math.round(cy + bgRadius * Math.sin(angle));
-    if (x >= 0 && x < width && y >= 0 && y < height) {
-      bgSum += gray[y * width + x];
-      bgCount++;
-    }
-  }
-  const bgLevel = bgCount > 0 ? bgSum / bgCount : 200;
-
   const sorted = Array.from(samples).sort((a, b) => a - b);
-  const darkLevel = sorted[Math.floor(numSamples * 0.1)];
-  const threshold = (darkLevel + bgLevel) / 2;
+  const lo = sorted[Math.floor(numSamples * 0.1)];
+  const hi = sorted[Math.floor(numSamples * 0.9)];
+  const threshold = (lo + hi) / 2;
 
   const dark = new Uint8Array(numSamples);
   for (let i = 0; i < numSamples; i++) {
@@ -65,6 +53,7 @@ export function analyzeOrientation(
   let bestScore = -1;
   let bestAngle = 0;
   let bestReflected = false;
+  let bestInverted = false;
 
   for (let offset = 0; offset < numSamples; offset++) {
     let score = 0;
@@ -74,21 +63,39 @@ export function analyzeOrientation(
       if (dark[si] === expectedDark[i]) score++;
       if (dark[si] === expectedDarkRefl[i]) scoreRefl++;
     }
+    const angleAtOffset = (offset / numSamples) * Math.PI * 2;
     if (score > bestScore) {
       bestScore = score;
-      bestAngle = (offset / numSamples) * Math.PI * 2;
+      bestAngle = angleAtOffset;
       bestReflected = false;
+      bestInverted = false;
     }
     if (scoreRefl > bestScore) {
       bestScore = scoreRefl;
-      bestAngle = (offset / numSamples) * Math.PI * 2;
+      bestAngle = angleAtOffset;
       bestReflected = true;
+      bestInverted = false;
+    }
+    const invScore = numSamples - score;
+    if (invScore > bestScore) {
+      bestScore = invScore;
+      bestAngle = angleAtOffset;
+      bestReflected = false;
+      bestInverted = true;
+    }
+    const invScoreRefl = numSamples - scoreRefl;
+    if (invScoreRefl > bestScore) {
+      bestScore = invScoreRefl;
+      bestAngle = angleAtOffset;
+      bestReflected = true;
+      bestInverted = true;
     }
   }
 
   return {
     angle: bestAngle,
     reflected: bestReflected,
+    inverted: bestInverted,
     confidence: bestScore / numSamples,
   };
 }

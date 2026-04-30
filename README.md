@@ -13,7 +13,8 @@ Not Apple-compatible — this is an independent format with its own encoding, er
 - **Dual-color SVG rendering** — Primary color for data arcs, secondary color for non-data segments with configurable gap separation
 - **Canvas rendering** — Delegates to SVG renderer for consistent output across both render paths
 - **YOLO-Pose detection** — YOLOv8-Pose model predicts bounding box + 4 corner keypoints for direct perspective correction
-- **Algorithmic orientation analysis** — Samples the orientation ring pattern to determine rotation angle and detect mirror reflections without ML
+- **Inverted code support** — Automatically detects and decodes both dark-on-light and light-on-dark codes; the orientation analyzer, sampler, and validator all handle either polarity
+- **Algorithmic orientation analysis** — Samples the orientation ring pattern to determine rotation angle, mirror reflection, and color polarity without ML
 - **Canvas-free processing** — Internal pipeline uses raw `ImageBuffer` arrays, no DOM dependency for scan logic
 - **Frame scoring** — Laplacian sharpness + contrast scoring to pick the best video frames
 - **Multi-frame consensus** — Weighted majority voting across frames for reliable scanning
@@ -42,10 +43,10 @@ training/
   requirements.txt     Python dependencies
   setup_venv.sh        Virtual environment setup script
 
-tests/                 Vitest unit and integration tests (211 tests)
+tests/                 Vitest unit and integration tests (217 tests)
 models/circular_code/  Trained TF.js model output
 dataset/               Generated training images and labels (YOLO-Pose format)
-example/               Browser demo app with pipeline debug view
+example/               Browser demo app with pipeline debug view and invert toggle
 ```
 
 ## Quick Start
@@ -70,7 +71,7 @@ Compiles TypeScript to `dist/` and resolves `@/` path aliases for Node.js.
 npm test
 ```
 
-Runs 211 tests across 19 test files covering: GF(256) arithmetic, bitstream, encoder/decoder roundtrips, Reed-Solomon error correction, layout geometry, orientation ring, SVG rendering, perspective math, polar grid sampling, validation, frame scoring, Hough detection, YOLO parsing (standard/OBB/Pose), orientation analysis, scan pipeline (corner resolution, flip, rectification), multi-frame consensus, image buffer operations, and end-to-end flows.
+Runs 217 tests across 19 test files covering: GF(256) arithmetic, bitstream, encoder/decoder roundtrips, Reed-Solomon error correction, layout geometry, orientation ring, SVG rendering, perspective math, polar grid sampling (including inverted polarity), validation, frame scoring, Hough detection, YOLO parsing (standard/OBB/Pose), orientation analysis (normal and inverted codes), scan pipeline (corner resolution, flip, rectification), multi-frame consensus, image buffer operations, and end-to-end flows.
 
 ### Type Check
 
@@ -91,16 +92,24 @@ const code = encode("https://example.com", {
   eccBytes: 16,
 });
 
+// Normal (dark on light)
 const svg = renderSVG(code, {
   size: 400,
   primary: "#1a1a2e",
   secondary: "#e0ddd5",
 });
 
+// Inverted (light on dark)
+const svgInverted = renderSVG(code, {
+  size: 400,
+  primary: "#ffffff",
+  secondary: "#303030",
+});
+
 document.getElementById("container").innerHTML = svg;
 ```
 
-The rendered code includes an outer orientation ring with three asymmetric arcs (180°, 90°, 45°) that allow the scanner to determine the code's rotation and detect mirror reflections.
+The rendered code includes an outer orientation ring with three asymmetric arcs (180°, 90°, 45°) that allow the scanner to determine the code's rotation, detect mirror reflections, and identify color polarity. Both dark-on-light and light-on-dark codes are supported — the scanner auto-detects polarity from the orientation ring pattern.
 
 ### Decode
 
@@ -119,7 +128,7 @@ const result = scanFrame(videoElement); // or pass a canvas or ImageBuffer
 
 if (result.decoded) {
   console.log(result.decoded);          // the text
-  console.log(result.orientation);      // { angle, reflected, confidence }
+  console.log(result.orientation);      // { angle, reflected, inverted, confidence }
   console.log(result.detection);        // { cx, cy, r, corners, confidence }
   console.log(result.validation);       // { valid, centerDot, ringContrast, segmentPattern, score }
 }
@@ -186,6 +195,7 @@ Produces 12,000 images (8,000 positive + 4,000 negative) with an 85/15 train/val
 - Varied ring/segment configs (3-6 rings, 32/48/64 segments)
 - Full 3D perspective transforms (pitch, yaw, roll with focal-length projection)
 - Dual-color rendering, noise, lighting gradients, blur, and background clutter
+- ~35% inverted polarity (light codes on dark backgrounds) for polarity-robust detection
 
 Hard negative samples include concentric circles, bullseyes, spirals, clock faces, dashed rings, QR-like grids, and center-dot patterns.
 
@@ -210,18 +220,18 @@ The 4 keypoints are the perspective-warped corners of the code (top-left, top-ri
 ### Step 2: Train the Model
 
 ```bash
-python training/train.py
+npm run train
 ```
 
-Trains a YOLOv8n-pose model on the synthetic dataset and auto-exports to TF.js format.
+Sets up a Python virtual environment (if needed), installs dependencies, then trains a YOLOv8n-pose model on the synthetic dataset and auto-exports to TF.js format.
 
-Options:
+Options (passed after `--`):
 
 ```bash
-python training/train.py --epochs 40 --batch-size 32
-python training/train.py --dataset ./my_dataset --output ./my_model
-python training/train.py --resume runs/pose/circular_code/weights/best.pt
-python training/train.py --base-model yolov8s-pose.pt  # larger model
+npm run train -- --epochs 40 --batch-size 32
+npm run train -- --dataset ./my_dataset --output ./my_model
+npm run train -- --resume runs/pose/circular_code/weights/best.pt
+npm run train -- --base-model yolov8s-pose.pt  # larger model
 ```
 
 ### Step 3: Verify
@@ -242,13 +252,10 @@ npm install
 npm run build
 npm test
 
-# Set up training environment
-cd training && bash setup_venv.sh && source venv/bin/activate && cd ..
-
 # Generate dataset and train
 npm run build
 npm run generate-dataset
-python training/train.py --epochs 40
+npm run train -- --epochs 40
 
 # Verify model quality
 npx vitest run tests/model.test.ts
@@ -298,10 +305,9 @@ Video frame -> Capture to ImageBuffer (320x320)
             -> Orientation ring analysis (algorithmic):
                - Samples grayscale values around orientation ring radius
                - Correlates against known long/medium/short arc pattern
-               - Determines rotation angle and reflection state
-            -> Flip if reflected
+               - Determines rotation angle, reflection state, and color polarity
             -> Score frame (sharpness + contrast)
-            -> Polar grid sampling -> Bit extraction
+            -> Polar grid sampling (polarity-aware) -> Bit extraction
             -> RS decode -> Multi-frame consensus -> Result
 
 Fallback: Hough circle detection + estimated corners (when model unavailable)
@@ -381,6 +387,7 @@ type DetectionResult = {
 type OrientationAnalysis = {
   angle: number;            // orientation ring rotation (radians)
   reflected: boolean;       // true if code is mirror-reflected
+  inverted: boolean;        // true if code is light-on-dark (inverted polarity)
   confidence: number;       // match quality 0-1
 };
 

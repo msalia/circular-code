@@ -48,6 +48,47 @@ function drawOrientationRing(
   }
 }
 
+function drawInvertedOrientationRing(
+  buf: ImageBuffer,
+  rings: number,
+  size: number,
+  rotationOffset = 0,
+): void {
+  const cx = size / 2;
+  const cy = size / 2;
+  const radius = getOrientationRingRadius(rings, size);
+  const arcs = getOrientationArcs();
+  const strokeHalf = getRingWidth(rings, size) * 0.4;
+
+  for (const arc of arcs) {
+    const start = arc.start + rotationOffset;
+    const end = arc.end + rotationOffset;
+    for (let y = 0; y < buf.height; y++) {
+      for (let x = 0; x < buf.width; x++) {
+        const dx = x - cx;
+        const dy = y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (Math.abs(dist - radius) > strokeHalf) continue;
+        let angle = Math.atan2(dy, dx);
+        if (angle < 0) angle += Math.PI * 2;
+        let s = start % (Math.PI * 2);
+        let e = end % (Math.PI * 2);
+        if (s < 0) s += Math.PI * 2;
+        if (e < 0) e += Math.PI * 2;
+        const inArc = s < e
+          ? angle >= s && angle <= e
+          : angle >= s || angle <= e;
+        if (inArc) {
+          const idx = (y * buf.width + x) * 4;
+          buf.data[idx] = 255;
+          buf.data[idx + 1] = 255;
+          buf.data[idx + 2] = 255;
+        }
+      }
+    }
+  }
+}
+
 describe("analyzeOrientation", () => {
   const rings = 5;
   const size = 300;
@@ -111,5 +152,30 @@ describe("analyzeOrientation", () => {
     drawOrientationRing(buf, 6, 300, 0);
     const result = analyzeOrientation(buf, 6, 300);
     expect(result.confidence).toBeGreaterThan(0.5);
+  });
+
+  it("detects inverted code (light arcs on dark background)", () => {
+    const buf = makeBlackBuffer(size);
+    drawInvertedOrientationRing(buf, rings, size, 0);
+    const result = analyzeOrientation(buf, rings, size);
+    expect(result.confidence).toBeGreaterThan(0.5);
+    expect(result.inverted).toBe(true);
+    expect(result.angle).toBeCloseTo(0, 0);
+  });
+
+  it("detects inverted code rotated by PI/2", () => {
+    const buf = makeBlackBuffer(size);
+    drawInvertedOrientationRing(buf, rings, size, Math.PI / 2);
+    const result = analyzeOrientation(buf, rings, size);
+    expect(result.confidence).toBeGreaterThan(0.5);
+    expect(result.inverted).toBe(true);
+    expect(result.angle).toBeCloseTo(Math.PI / 2, 0);
+  });
+
+  it("normal code is not inverted", () => {
+    const buf = makeWhiteBuffer(size);
+    drawOrientationRing(buf, rings, size, 0);
+    const result = analyzeOrientation(buf, rings, size);
+    expect(result.inverted).toBe(false);
   });
 });

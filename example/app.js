@@ -13079,7 +13079,7 @@
   });
 
   // node_modules/@tensorflow/tfjs-core/dist/ops/image/threshold.js
-  function threshold_(image2, method = "binary", inverted = false, threshValue = 0.5) {
+  function threshold_(image2, method = "binary", inverted2 = false, threshValue = 0.5) {
     const $image = convertToTensor(image2, "image", "threshold");
     const RED_INTENCITY_COEF = 0.2989;
     const GREEN_INTENCITY_COEF = 0.587;
@@ -13104,7 +13104,7 @@
       const $histogram = bincount(cast(round2(grayscale), "int32"), tensor([]), 256);
       $threshold = otsu($histogram, totalPixelsInImage);
     }
-    const invCondition = inverted ? lessEqual(grayscale, $threshold) : greater(grayscale, $threshold);
+    const invCondition = inverted2 ? lessEqual(grayscale, $threshold) : greater(grayscale, $threshold);
     const result = cast(mul(invCondition, 255), "int32");
     return result;
   }
@@ -75224,7 +75224,17 @@ return a / b;`;
   function decode(bits, eccBytes = 16) {
     const bytes = bitsToBytes(bits);
     const decoded = rsDecode(bytes, eccBytes);
+    if (decoded.length < 2) {
+      throw new Error("Decoded data too short for header");
+    }
+    const version8 = decoded[0];
+    if (version8 !== 1) {
+      throw new Error(`Unsupported version: ${version8}`);
+    }
     const length = decoded[1];
+    if (2 + length > decoded.length) {
+      throw new Error(`Invalid payload length: ${length}`);
+    }
     const payload = decoded.slice(2, 2 + length);
     return new TextDecoder().decode(payload);
   }
@@ -75463,19 +75473,11 @@ return a / b;`;
     const hasAngle = !hasPose && channels === 6;
     const confChannel = hasAngle ? 5 : 4;
     const numKeypoints = hasPose ? extraChannels / 3 : 0;
-    let needsSigmoid = false;
-    for (let i = 0; i < Math.min(numCandidates, 100); i++) {
-      const v = outputData[confChannel * numCandidates + i];
-      if (v < 0 || v > 1) {
-        needsSigmoid = true;
-        break;
-      }
-    }
     let bestConf = threshold3;
     let bestIdx = -1;
     for (let i = 0; i < numCandidates; i++) {
       const raw = outputData[confChannel * numCandidates + i];
-      const conf = needsSigmoid ? sigmoid4(raw) : raw;
+      const conf = sigmoid4(raw);
       if (conf > bestConf) {
         bestConf = conf;
         bestIdx = i;
@@ -75738,22 +75740,10 @@ return a / b;`;
         samples[i] = 128;
       }
     }
-    let bgSum = 0;
-    let bgCount = 0;
-    const bgRadius = radius * 0.5;
-    for (let a = 0; a < 8; a++) {
-      const angle = a / 8 * Math.PI * 2;
-      const x2 = Math.round(cx + bgRadius * Math.cos(angle));
-      const y = Math.round(cy + bgRadius * Math.sin(angle));
-      if (x2 >= 0 && x2 < width && y >= 0 && y < height) {
-        bgSum += gray[y * width + x2];
-        bgCount++;
-      }
-    }
-    const bgLevel = bgCount > 0 ? bgSum / bgCount : 200;
     const sorted = Array.from(samples).sort((a, b) => a - b);
-    const darkLevel = sorted[Math.floor(numSamples * 0.1)];
-    const threshold3 = (darkLevel + bgLevel) / 2;
+    const lo = sorted[Math.floor(numSamples * 0.1)];
+    const hi = sorted[Math.floor(numSamples * 0.9)];
+    const threshold3 = (lo + hi) / 2;
     const dark = new Uint8Array(numSamples);
     for (let i = 0; i < numSamples; i++) {
       dark[i] = samples[i] < threshold3 ? 1 : 0;
@@ -75763,6 +75753,7 @@ return a / b;`;
     let bestScore = -1;
     let bestAngle = 0;
     let bestReflected = false;
+    let bestInverted = false;
     for (let offset = 0; offset < numSamples; offset++) {
       let score = 0;
       let scoreRefl = 0;
@@ -75771,20 +75762,38 @@ return a / b;`;
         if (dark[si] === expectedDark[i]) score++;
         if (dark[si] === expectedDarkRefl[i]) scoreRefl++;
       }
+      const angleAtOffset = offset / numSamples * Math.PI * 2;
       if (score > bestScore) {
         bestScore = score;
-        bestAngle = offset / numSamples * Math.PI * 2;
+        bestAngle = angleAtOffset;
         bestReflected = false;
+        bestInverted = false;
       }
       if (scoreRefl > bestScore) {
         bestScore = scoreRefl;
-        bestAngle = offset / numSamples * Math.PI * 2;
+        bestAngle = angleAtOffset;
         bestReflected = true;
+        bestInverted = false;
+      }
+      const invScore = numSamples - score;
+      if (invScore > bestScore) {
+        bestScore = invScore;
+        bestAngle = angleAtOffset;
+        bestReflected = false;
+        bestInverted = true;
+      }
+      const invScoreRefl = numSamples - scoreRefl;
+      if (invScoreRefl > bestScore) {
+        bestScore = invScoreRefl;
+        bestAngle = angleAtOffset;
+        bestReflected = true;
+        bestInverted = true;
       }
     }
     return {
       angle: bestAngle,
       reflected: bestReflected,
+      inverted: bestInverted,
       confidence: bestScore / numSamples
     };
   }
@@ -75909,24 +75918,47 @@ return a / b;`;
   }
 
   // src/scan/sampler.ts
-  function samplePolarGrid(frame2, cx, cy, codeSize, rings = 5, segmentsPerRing = 48, orientationOffset = 0) {
+  function pixelBrightness(data, width, height, x2, y) {
+    const ix = Math.round(x2);
+    const iy = Math.round(y);
+    if (ix < 0 || ix >= width || iy < 0 || iy >= height) return -1;
+    const idx = (iy * width + ix) * 4;
+    return (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
+  }
+  function samplePolarGrid(frame2, cx, cy, codeSize, rings = 5, segmentsPerRing = 48, orientationOffset = 0, inverted2 = false) {
     const { data, width, height } = frame2;
+    const ringWidth = getRingWidth(rings, codeSize);
     const bits = [];
     for (let r = 0; r < rings; r++) {
       if (!isDataRing(r)) continue;
       const segs = getSegmentsForRing(r, rings, segmentsPerRing);
-      const sampleRadius = getRingRadius(r, rings, codeSize);
+      const centerRadius = getRingRadius(r, rings, codeSize);
+      const innerRadius = centerRadius - ringWidth * 0.1;
+      const outerRadius = centerRadius + ringWidth * 0.1;
+      const ringBrightness = [];
       for (let segment = 0; segment < segs; segment++) {
         const angle = getSegmentAngle(segment, segs) + orientationOffset;
-        const x2 = Math.round(cx + sampleRadius * Math.cos(angle));
-        const y = Math.round(cy + sampleRadius * Math.sin(angle));
-        if (x2 < 0 || x2 >= width || y < 0 || y >= height) {
-          bits.push(0);
-          continue;
+        const cosA = Math.cos(angle);
+        const sinA = Math.sin(angle);
+        let sum5 = 0;
+        let count2 = 0;
+        for (const sr of [innerRadius, centerRadius, outerRadius]) {
+          const b = pixelBrightness(data, width, height, cx + sr * cosA, cy + sr * sinA);
+          if (b >= 0) {
+            sum5 += b;
+            count2++;
+          }
         }
-        const idx = (y * width + x2) * 4;
-        const brightness = (data[idx] + data[idx + 1] + data[idx + 2]) / 3;
-        bits.push(brightness < 128 ? 1 : 0);
+        const avg = count2 > 0 ? sum5 / count2 : 128;
+        ringBrightness.push(avg);
+      }
+      const sorted = Float64Array.from(ringBrightness).sort();
+      const lo = sorted[Math.floor(sorted.length * 0.25)];
+      const hi = sorted[Math.floor(sorted.length * 0.75)];
+      const threshold3 = hi - lo < 30 ? 128 : (lo + hi) / 2;
+      for (let segment = 0; segment < segs; segment++) {
+        const dark = ringBrightness[segment] < threshold3;
+        bits.push(dark !== inverted2 ? 1 : 0);
       }
     }
     return bits;
@@ -75980,7 +76012,7 @@ return a / b;`;
       bgCount++;
     }
     const bgBrightness = bgCount > 0 ? bgSum / bgCount : 200;
-    return centerBrightness < bgBrightness - 30;
+    return Math.abs(centerBrightness - bgBrightness) > 30;
   }
   function checkRingContrast(gray, width, cx, cy, rings, size) {
     const numAngles = 16;
@@ -76095,7 +76127,9 @@ return a / b;`;
       codeSize / 2,
       codeSize,
       rings,
-      segmentsPerRing
+      segmentsPerRing,
+      orientation.angle,
+      orientation.inverted
     );
     let decoded = null;
     let error = null;
@@ -76139,6 +76173,15 @@ return a / b;`;
   var optSegments = document.getElementById("opt-segments");
   var optEcc = document.getElementById("opt-ecc");
   var optSize = document.getElementById("opt-size");
+  var optInvert = document.getElementById("opt-invert");
+  var inverted = false;
+  optInvert.addEventListener("click", () => {
+    inverted = !inverted;
+    optInvert.textContent = inverted ? "On" : "Off";
+    optInvert.style.borderColor = inverted ? "#555" : "#333";
+    optInvert.style.color = inverted ? "#fff" : "#e0e0e0";
+    if (lastCode) generate();
+  });
   function generate() {
     const text = textInput.value;
     if (!text) return;
@@ -76150,10 +76193,13 @@ return a / b;`;
     try {
       const code = encode(text, { rings, segmentsPerRing, eccBytes });
       lastCode = code;
-      const svg = renderSVG(code, { size, primary: "#000000", secondary: "#d0d0d0" });
+      const primary = inverted ? "#ffffff" : "#000000";
+      const secondary = inverted ? "#303030" : "#d0d0d0";
+      const svg = renderSVG(code, { size, primary, secondary });
       lastSvg = svg;
       codeOutput.innerHTML = svg;
       codeOutput.classList.remove("empty");
+      codeOutput.style.background = inverted ? "#111" : "#fff";
       downloadRow.style.display = "flex";
       const decoded = decode(code.bits, eccBytes);
       decodeResult.textContent = decoded;
@@ -76325,7 +76371,8 @@ return a / b;`;
     const ang = det.angle != null ? ` ang:${(det.angle * 180 / Math.PI).toFixed(0)}` : "";
     const ori = result.orientation;
     const ref = ori.reflected ? " REFL" : "";
-    octx.fillText(`${(det.confidence * 100).toFixed(0)}% r:${det.r.toFixed(0)}${ang} ori:${(ori.angle * 180 / Math.PI).toFixed(0)}${ref}`, 8, 20);
+    const inv = ori.inverted ? " INV" : "";
+    octx.fillText(`${(det.confidence * 100).toFixed(0)}% r:${det.r.toFixed(0)}${ang} ori:${(ori.angle * 180 / Math.PI).toFixed(0)}${ref}${inv}`, 8, 20);
     octx.fillStyle = v.valid ? "#00ff0080" : "#ff000040";
     octx.fillText(`${v.valid ? "VALID" : "invalid"} (${v.score.toFixed(2)})`, 8, videoH - 8);
     drawPipelineStep("dbg-capture", captured);
@@ -76391,7 +76438,7 @@ return a / b;`;
     rCtx.font = "9px monospace";
     rCtx.fillStyle = "#666";
     rCtx.fillText(`dot:${v.centerDot ? "Y" : "n"} ring:${v.ringContrast ? "Y" : "n"} seg:${v.segmentPattern ? "Y" : "n"}`, 60, 80);
-    rCtx.fillText(`orient: ${(ori.angle * 180 / Math.PI).toFixed(0)} ${ori.reflected ? "REFL" : ""}`, 60, 95);
+    rCtx.fillText(`orient: ${(ori.angle * 180 / Math.PI).toFixed(0)} ${ori.reflected ? "REFL" : ""} ${ori.inverted ? "INV" : ""}`, 60, 95);
     rCtx.fillText(`conf: ${(ori.confidence * 100).toFixed(0)}%`, 60, 110);
     if (result.decoded) {
       decodeCount++;

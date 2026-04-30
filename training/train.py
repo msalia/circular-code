@@ -13,10 +13,10 @@ import argparse
 import os
 import shutil
 import ssl
+import sys
+import types
 
 ssl._create_default_https_context = ssl._create_unverified_context
-
-import contextlib
 
 class _SequentialPool:
     """Drop-in replacement for ThreadPool that runs tasks sequentially."""
@@ -97,13 +97,29 @@ def main():
         return
 
     print(f"\nBest model: {best_pt}")
-    print("Exporting to TensorFlow.js...")
+    print("Exporting to TensorFlow SavedModel + TF.js...")
 
     best_model = YOLO(best_pt)
-    export_path = best_model.export(format="tfjs", imgsz=IMAGE_SIZE)
+    best_model.export(format="saved_model", imgsz=IMAGE_SIZE)
+
+    saved_model_dir = os.path.join(os.path.dirname(best_pt), "best_saved_model")
+    tfjs_dir = os.path.join(os.path.dirname(best_pt), "best_web_model")
+
+    # Block tensorflow_decision_forests to avoid protobuf version conflict
+    sys.modules["tensorflow_decision_forests"] = types.ModuleType("tensorflow_decision_forests")
+    from tensorflowjs.converters import converter
+
+    converter.convert([
+        "--input_format=tf_saved_model",
+        "--output_format=tfjs_graph_model",
+        "--signature_name=serving_default",
+        "--saved_model_tags=serve",
+        "--weight_shard_size_bytes=4194304",
+        saved_model_dir,
+        tfjs_dir,
+    ])
 
     os.makedirs(args.output, exist_ok=True)
-    tfjs_dir = export_path if os.path.isdir(export_path) else os.path.dirname(export_path)
     for f in os.listdir(tfjs_dir):
         if f.endswith((".json", ".bin")):
             src = os.path.join(tfjs_dir, f)

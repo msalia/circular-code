@@ -225,7 +225,9 @@ async function generatePositive(index: number, split: "train" | "val"): Promise<
   const canvas = createCanvas(SIZE, SIZE);
   const ctx = canvas.getContext("2d");
 
-  const bgColor = randomColor(180, 255);
+  const inverted = Math.random() < 0.35;
+
+  const bgColor = inverted ? randomColor(0, 60) : randomColor(180, 255);
   ctx.fillStyle = bgColor;
   ctx.fillRect(0, 0, SIZE, SIZE);
 
@@ -258,10 +260,19 @@ async function generatePositive(index: number, split: "train" | "val"): Promise<
   ctx.translate(cx, cy);
   ctx.transform(matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5]);
 
-  const fgBright = randomInt(0, 60);
-  const fgColor = `rgb(${fgBright},${fgBright},${fgBright})`;
-  const secBright = randomInt(Math.min(fgBright + 40, 200), 230);
-  const secColor = `rgb(${secBright},${secBright},${secBright})`;
+  let fgColor: string;
+  let secColor: string;
+  if (inverted) {
+    const fgBright = randomInt(200, 255);
+    fgColor = `rgb(${fgBright},${fgBright},${fgBright})`;
+    const secBright = randomInt(30, Math.max(40, fgBright - 40));
+    secColor = `rgb(${secBright},${secBright},${secBright})`;
+  } else {
+    const fgBright = randomInt(0, 60);
+    fgColor = `rgb(${fgBright},${fgBright},${fgBright})`;
+    const secBright = randomInt(Math.min(fgBright + 40, 200), 230);
+    secColor = `rgb(${secBright},${secBright},${secBright})`;
+  }
   await drawCircularCode(ctx, code, 0, 0, codeSize, fgColor, secColor);
   ctx.restore();
 

@@ -117,4 +117,25 @@ describe("samplePolarGrid", () => {
     }
     expect(bits.length).toBe(expectedTotal);
   });
+
+  it("inverted flag flips bit sense on a half buffer", () => {
+    const buf = makeHalfBuffer(300);
+    const normal = samplePolarGrid(buf, 150, 150, 300, 5, 48, 0, false);
+    const inverted = samplePolarGrid(buf, 150, 150, 300, 5, 48, 0, true);
+    for (let i = 0; i < normal.length; i++) {
+      expect(inverted[i]).toBe(1 - normal[i]);
+    }
+  });
+
+  it("inverted samples all 0 for a black buffer", () => {
+    const buf = makeBlackBuffer(300);
+    const bits = samplePolarGrid(buf, 150, 150, 300, 5, 48, 0, true);
+    expect(bits.every((b) => b === 0)).toBe(true);
+  });
+
+  it("inverted samples all 1 for a white buffer", () => {
+    const buf = makeWhiteBuffer(300);
+    const bits = samplePolarGrid(buf, 150, 150, 300, 5, 48, 0, true);
+    expect(bits.every((b) => b === 1)).toBe(true);
+  });
 });

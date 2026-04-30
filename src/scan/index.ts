@@ -165,6 +165,8 @@ export function scanFrame(
     codeSize,
     rings,
     segmentsPerRing,
+    orientation.angle,
+    orientation.inverted,
   );
 
   let decoded: string | null = null;
@@ -204,7 +206,12 @@ export function sampleAndDecode(
   eccBytes: number,
   outputSize = CODE_SIZE,
 ): string {
-  const { image: rectified, validation } = rectifyCode(frame, detection, rings, outputSize);
+  const { image: rectified, validation, orientation } = rectifyCode(
+    frame,
+    detection,
+    rings,
+    outputSize,
+  );
 
   if (!validation.valid) {
     throw new Error(`Not a circular code (score=${validation.score.toFixed(2)})`);
@@ -217,6 +224,8 @@ export function sampleAndDecode(
     outputSize,
     rings,
     segmentsPerRing,
+    orientation.angle,
+    orientation.inverted,
   );
 
   return decode(bits, eccBytes);

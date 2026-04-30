@@ -80,7 +80,7 @@ function checkCenterDot(
   }
   const bgBrightness = bgCount > 0 ? bgSum / bgCount : 200;
 
-  return centerBrightness < bgBrightness - 30;
+  return Math.abs(centerBrightness - bgBrightness) > 30;
 }
 
 function checkRingContrast(

@@ -25,6 +25,16 @@ const optRings = document.getElementById("opt-rings") as HTMLSelectElement;
 const optSegments = document.getElementById("opt-segments") as HTMLSelectElement;
 const optEcc = document.getElementById("opt-ecc") as HTMLSelectElement;
 const optSize = document.getElementById("opt-size") as HTMLInputElement;
+const optInvert = document.getElementById("opt-invert") as HTMLButtonElement;
+
+let inverted = false;
+optInvert.addEventListener("click", () => {
+  inverted = !inverted;
+  optInvert.textContent = inverted ? "On" : "Off";
+  optInvert.style.borderColor = inverted ? "#555" : "#333";
+  optInvert.style.color = inverted ? "#fff" : "#e0e0e0";
+  if (lastCode) generate();
+});
 
 function generate() {
   const text = textInput.value;
@@ -40,11 +50,14 @@ function generate() {
     const code = encode(text, { rings, segmentsPerRing, eccBytes });
     lastCode = code;
 
-    const svg = renderSVG(code, { size, primary: "#000000", secondary: "#d0d0d0" });
+    const primary = inverted ? "#ffffff" : "#000000";
+    const secondary = inverted ? "#303030" : "#d0d0d0";
+    const svg = renderSVG(code, { size, primary, secondary });
     lastSvg = svg;
 
     codeOutput.innerHTML = svg;
     codeOutput.classList.remove("empty");
+    codeOutput.style.background = inverted ? "#111" : "#fff";
     downloadRow.style.display = "flex";
 
     const decoded = decode(code.bits, eccBytes);
@@ -245,7 +258,8 @@ function scanLoop() {
   const ang = det.angle != null ? ` ang:${((det.angle * 180) / Math.PI).toFixed(0)}` : "";
   const ori = result.orientation;
   const ref = ori.reflected ? " REFL" : "";
-  octx.fillText(`${(det.confidence * 100).toFixed(0)}% r:${det.r.toFixed(0)}${ang} ori:${((ori.angle * 180) / Math.PI).toFixed(0)}${ref}`, 8, 20);
+  const inv = ori.inverted ? " INV" : "";
+  octx.fillText(`${(det.confidence * 100).toFixed(0)}% r:${det.r.toFixed(0)}${ang} ori:${((ori.angle * 180) / Math.PI).toFixed(0)}${ref}${inv}`, 8, 20);
   octx.fillStyle = v.valid ? "#00ff0080" : "#ff000040";
   octx.fillText(`${v.valid ? "VALID" : "invalid"} (${v.score.toFixed(2)})`, 8, videoH - 8);
 
@@ -317,7 +331,7 @@ function scanLoop() {
   rCtx.font = "9px monospace";
   rCtx.fillStyle = "#666";
   rCtx.fillText(`dot:${v.centerDot ? "Y" : "n"} ring:${v.ringContrast ? "Y" : "n"} seg:${v.segmentPattern ? "Y" : "n"}`, 60, 80);
-  rCtx.fillText(`orient: ${((ori.angle * 180) / Math.PI).toFixed(0)} ${ori.reflected ? "REFL" : ""}`, 60, 95);
+  rCtx.fillText(`orient: ${((ori.angle * 180) / Math.PI).toFixed(0)} ${ori.reflected ? "REFL" : ""} ${ori.inverted ? "INV" : ""}`, 60, 95);
   rCtx.fillText(`conf: ${(ori.confidence * 100).toFixed(0)}%`, 60, 110);
 
   // --- Result handling ---
