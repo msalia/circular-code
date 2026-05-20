@@ -75010,6 +75010,11 @@ return a / b;`;
   var DEFAULT_CAPTURE_SIZE = 320;
   var CONFIDENCE_THRESHOLD = 0.5;
   var DEFAULT_CORNER_PADDING = 1.15;
+  var AUTO_MIN_RINGS = 4;
+  var AUTO_MAX_RINGS = 8;
+  var AUTO_MIN_ECC = 2;
+  var AUTO_MAX_ECC = 8;
+  var AUTO_SEGMENT_CANDIDATES = [32, 48];
 
   // src/core/layout.ts
   var GAP_FRACTION = 0.3;
@@ -75073,16 +75078,7 @@ return a / b;`;
     return ring > 0;
   }
   function getSegmentsForRing(ring, rings, baseSegments) {
-    const raw = Math.max(8, Math.round(baseSegments * (ring + 1) / rings));
-    if (ring !== rings - 1) return raw;
-    let innerTotal = 0;
-    for (let r = 0; r < rings - 1; r++) {
-      if (isDataRing(r)) {
-        innerTotal += Math.max(8, Math.round(baseSegments * (r + 1) / rings));
-      }
-    }
-    const pad2 = (8 - (innerTotal + raw) % 8) % 8;
-    return raw + pad2;
+    return Math.max(8, Math.round(baseSegments * (ring + 1) / rings));
   }
   function getTotalSegments(rings, baseSegments) {
     let total = 0;
@@ -75214,23 +75210,15 @@ return a / b;`;
   }
 
   // src/core/autoSize.ts
-  var MIN_RINGS = 3;
-  var MAX_RINGS = 16;
-  var MIN_ECC = 4;
-  var MAX_ECC = 32;
-  var SEGMENT_CANDIDATES = [48, 64, 80];
   function computeDataBytes(input2) {
     const mode = detectMode(input2);
     const count2 = mode === Mode.BYTE ? new TextEncoder().encode(input2).length : input2.length;
     const headerBytes = count2 <= 62 ? 2 : 3;
-    const dataBytes = packedByteCount(
-      mode === Mode.BYTE ? count2 : input2.length,
-      mode
-    );
+    const dataBytes = packedByteCount(mode === Mode.BYTE ? count2 : input2.length, mode);
     return headerBytes + dataBytes;
   }
-  function minRingsForBits(neededBits, segmentsPerRing) {
-    for (let rings = MIN_RINGS; rings <= MAX_RINGS; rings++) {
+  function minRingsForBits(neededBits, segmentsPerRing, minRings = AUTO_MIN_RINGS, maxRings = AUTO_MAX_RINGS) {
+    for (let rings = minRings; rings <= maxRings; rings++) {
       if (getTotalSegments(rings, segmentsPerRing) >= neededBits) {
         return rings;
       }
@@ -75258,7 +75246,7 @@ return a / b;`;
     return { rings, segmentsPerRing, eccBytes, capacityBits, usedBits: neededBits };
   }
   function autoSizeWithSegments(dataBytes, segmentsPerRing) {
-    const neededBits = (dataBytes + MIN_ECC) * 8;
+    const neededBits = (dataBytes + AUTO_MIN_ECC) * 8;
     const rings = minRingsForBits(neededBits, segmentsPerRing);
     if (rings === null) return null;
     const eccBytes = fillEcc(dataBytes, rings, segmentsPerRing);
@@ -75273,7 +75261,7 @@ return a / b;`;
   }
   function autoSizeWithEcc(dataBytes, eccBytes) {
     let best = null;
-    for (const segs of SEGMENT_CANDIDATES) {
+    for (const segs of AUTO_SEGMENT_CANDIDATES) {
       const neededBits = (dataBytes + eccBytes) * 8;
       const rings = minRingsForBits(neededBits, segs);
       if (rings === null) continue;
@@ -75291,8 +75279,8 @@ return a / b;`;
   }
   function autoSizeFull(dataBytes) {
     let best = null;
-    for (const segs of SEGMENT_CANDIDATES) {
-      const minBits = (dataBytes + MIN_ECC) * 8;
+    for (const segs of AUTO_SEGMENT_CANDIDATES) {
+      const minBits = (dataBytes + AUTO_MIN_ECC) * 8;
       const rings = minRingsForBits(minBits, segs);
       if (rings === null) continue;
       const eccBytes = fillEcc(dataBytes, rings, segs);
@@ -75312,7 +75300,7 @@ return a / b;`;
   function fillEcc(dataBytes, rings, segmentsPerRing) {
     const totalBytes = Math.floor(getTotalSegments(rings, segmentsPerRing) / 8);
     const spare = totalBytes - dataBytes;
-    return Math.min(Math.max(spare, MIN_ECC), MAX_ECC);
+    return Math.min(Math.max(spare, AUTO_MIN_ECC), AUTO_MAX_ECC);
   }
 
   // src/core/bitstream.ts
